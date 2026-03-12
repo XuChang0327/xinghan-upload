@@ -1,0 +1,121 @@
+{
+  "name": "xinghan-upload",
+  "displayName": "星瀚上传",
+  "description": "在 Cursor/VSCode 中一键上传代码到星瀚控制器 (ESP32 MicroPython)，上传逻辑由 Python 脚本 wired_uploader.py 完成",
+  "version": "0.6.0",
+  "publisher": "XuChang0327",
+  "icon": "logo.png",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "xinghan.upload",
+        "title": "星瀚: 上传当前文件到控制器"
+      },
+      {
+        "command": "xinghan.runOnDevice",
+        "title": "星瀚: 在控制器上运行当前文件"
+      },
+      {
+        "command": "xinghan.stopRunOnDevice",
+        "title": "星瀚: 停止设备上的运行"
+      },
+      {
+        "command": "xinghan.deleteFile",
+        "title": "星瀚: 删除控制器上的文件"
+      },
+      {
+        "command": "xinghan.connectWifi",
+        "title": "星瀚: 连接 WiFi"
+      },
+      {
+        "command": "xinghan.listPorts",
+        "title": "星瀚: 列出可用串口"
+      }
+    ],
+    "configuration": {
+      "title": "星瀚上传",
+      "properties": {
+        "xinghan.pythonPath": {
+          "type": "string",
+          "default": "python3",
+          "description": "用于执行上传脚本的 Python 解释器（如 python3、python 或完整路径）。"
+        },
+        "xinghan.serialPort": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "description": "指定串口（如 /dev/cu.usbmodem123、COM3）。留空则由脚本自动检测。"
+        },
+        "xinghan.wifiPresets": {
+          "type": "array",
+          "default": [
+            {
+              "name": "xuchang",
+              "password": "00000000",
+              "authMode": 3
+            },
+            {
+              "name": "YBC",
+              "password": "YBC123456@@",
+              "authMode": 3
+            }
+          ],
+          "description": "预设的常用 WiFi 列表。每项包含 name（WiFi名）、password（密码）、authMode（认证模式，默认3）。",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "WiFi 名称"
+              },
+              "password": {
+                "type": "string",
+                "description": "WiFi 密码"
+              },
+              "authMode": {
+                "type": "number",
+                "default": 3,
+                "description": "认证模式"
+              }
+            },
+            "required": [
+              "name",
+              "password"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run esbuild-base -- --minify",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "esbuild-base": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
+    "esbuild": "npm run esbuild-base -- --sourcemap",
+    "esbuild-watch": "npm run esbuild-base -- --sourcemap --watch",
+    "package": "npx @vscode/vsce package --allow-missing-repository --skip-license"
+  },
+  "dependencies": {
+    "tree-kill": "^1.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^18.x",
+    "@types/vscode": "^1.74.0",
+    "esbuild": "^0.27.3",
+    "typescript": "^5.0.0"
+  }
+}
