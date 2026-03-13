@@ -30,7 +30,7 @@
 
 ### 从 VSIX 安装（推荐）
 
-1. 下载 `xinghan-upload-0.7.0.vsix`（或从 Releases 获取）
+1. 下载 `xinghan-upload-0.7.1.vsix`（或从 Releases 获取）
 2. 在 Cursor/VSCode 中：`Cmd+Shift+P`（Mac）或 `Ctrl+Shift+P`（Win/Linux）→ 输入 **Extensions: Install from VSIX...** → 选择 `.vsix` 文件
 3. 重新加载窗口后即可使用
 
@@ -69,9 +69,12 @@ npm run esbuild    # 编译
 npm run package    # 生成 .vsix
 ```
 
-会在当前目录生成 `xinghan-upload-0.7.0.vsix`，可分发给他人安装。
+会在当前目录生成 `xinghan-upload-0.7.1.vsix`，可分发给他人安装。
 
 ## 更新日志
+
+### v0.7.1
+- **停止**：点击停止后除结束本机进程外，会向设备发送软复位（`machine.soft_reset()`），设备上正在运行的程序会真正停止并重启
 
 ### v0.7.0
 - 插件更名为 **星瀚助手**，活动栏与设置标题统一为「星瀚助手」

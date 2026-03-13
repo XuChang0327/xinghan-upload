@@ -376,6 +376,30 @@ wifi.connect("{ssid}", "{password}", {auth_mode}, on_connect)
         return 4
 
 
+def soft_reset(port=None):
+    """
+    向设备发送软复位，使设备上正在运行的程序停止并重启。
+    用于「停止」时真正停止设备端执行。
+    :param port: 串口；None 则自动检测
+    :return: 0 成功，非 0 失败
+    """
+    if not port:
+        port = get_default_port()
+    if not port:
+        print("❌ 错误：未检测到星瀚控制器！", file=sys.stderr)
+        return 2
+    cmd = ["mpremote", "connect", port, "exec", "import machine; machine.soft_reset()"]
+    try:
+        subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        return 0
+    except subprocess.TimeoutExpired:
+        return 3
+    except FileNotFoundError:
+        return 4
+    except Exception:
+        return 3
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="上传/运行/删除 .py 文件到星瀚控制器 (ESP32 MicroPython)")
@@ -390,6 +414,7 @@ def main():
     parser.add_argument("--write-file", metavar="FILENAME", help="从 stdin 读取内容并写入设备（覆盖该文件）")
     parser.add_argument("--delete", "-d", metavar="FILENAME", help="删除指定容器中的文件")
     parser.add_argument("--run", "-r", action="store_true", help="在设备上直接运行文件（不写入设备存储）")
+    parser.add_argument("--soft-reset", action="store_true", help="向设备发送软复位（停止设备上正在运行的程序）")
     parser.add_argument("--wifi", nargs=2, metavar=("SSID", "PASSWORD"), help="连接 WiFi：--wifi <名称> <密码>")
     parser.add_argument("--wifi-auth", type=int, default=3, help="WiFi 认证模式（默认 3）")
     args = parser.parse_args()
@@ -420,6 +445,9 @@ def main():
     if args.wifi:
         ssid, password = args.wifi
         return wifi_connect(ssid, password, auth_mode=args.wifi_auth, port=args.port)
+
+    if args.soft_reset:
+        return soft_reset(port=args.port)
 
     target_file = args.file or "main.py"
     if not os.path.isabs(target_file) and not os.path.exists(target_file):

@@ -2,7 +2,7 @@
   "name": "xinghan-upload",
   "displayName": "星瀚助手",
   "description": "在 Cursor/VSCode 中一键上传代码到星瀚控制器 (ESP32 MicroPython)，上传逻辑由 Python 脚本 wired_uploader.py 完成",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "publisher": "XuChang0327",
   "icon": "logo.png",
   "license": "MIT",

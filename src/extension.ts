@@ -465,16 +465,28 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // 停止当前在设备上运行的程序（释放串口，便于随后上传）
+  // 停止当前在设备上运行的程序：先结束本机进程释放串口，再向设备发送软复位
   context.subscriptions.push(
     vscode.commands.registerCommand("xinghan.stopRunOnDevice", async () => {
       if (!runOnDeviceProcess) {
         vscode.window.showInformationMessage("当前没有在设备上运行的程序。");
         return;
       }
-      channel.appendLine("\n[用户请求停止] 正在终止设备上的运行…");
+      channel.appendLine("\n[用户请求停止] 正在终止本机进程并释放串口…");
       await stopRunOnDeviceProcess(runOnDeviceProcess);
       runOnDeviceProcess = null;
+      await new Promise((r) => setTimeout(r, 500));
+
+      const config = getConfig();
+      const scriptPath = resolveScriptPath(context.extensionPath);
+      const args = ["--soft-reset"];
+      if (config.serialPort) args.push("--port", config.serialPort);
+      channel.appendLine("正在向设备发送软复位…");
+      const proc = spawn(config.pythonPath, [scriptPath, ...args], {
+        cwd: path.dirname(scriptPath),
+        shell: false,
+      });
+      await new Promise<void>((resolve) => proc.on("close", () => resolve()));
       vscode.window.showInformationMessage("星瀚: 已停止设备上的运行");
     })
   );
