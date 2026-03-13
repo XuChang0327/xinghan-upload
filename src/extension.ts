@@ -2,8 +2,19 @@ import * as vscode from "vscode";
 import * as path from "path";
 import { spawn, ChildProcess } from "child_process";
 import treeKill = require("tree-kill");
+import {
+  XinghanActionsTreeProvider,
+  XinghanDeviceFilesTreeProvider,
+  type DeviceFileInfo,
+} from "./views/XinghanTreeProvider";
+import {
+  XinghanDeviceFileSystemProvider,
+  toDeviceUri,
+  type ReadDeviceFile,
+  type WriteDeviceFile,
+} from "./views/XinghanDeviceFileSystemProvider";
 
-const OUTPUT_CHANNEL_NAME = "星瀚上传";
+const OUTPUT_CHANNEL_NAME = "星瀚助手";
 
 const CONTAINERS = ["container1", "container2", "container3", "container4", "container5"];
 
@@ -232,6 +243,108 @@ export function activate(context: vscode.ExtensionContext) {
   uploadStatusBarItem.show();
   context.subscriptions.push(uploadStatusBarItem);
 
+  // 列出指定容器中的文件（供侧边栏树使用）
+  async function listDeviceFilesForTree(container: string): Promise<DeviceFileInfo[]> {
+    const config = getConfig();
+    const scriptPath = resolveScriptPath(context.extensionPath);
+    const args = ["--list-files", "--container", container];
+    if (config.serialPort) args.push("--port", config.serialPort);
+    const { exitCode, stdout } = await runPythonScript(config.pythonPath, scriptPath, args, channel);
+    if (exitCode !== 0) throw new Error("list-files failed");
+    const raw = stdout.trim();
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as Array<{ name: string; size: string }>;
+    return parsed;
+  }
+
+  // 从设备读取文件内容（供虚拟文件系统用，不写入 output channel）
+  const readDeviceFileContent: ReadDeviceFile = (container: string, filename: string): Promise<Uint8Array> => {
+    return new Promise((resolve, reject) => {
+      const config = getConfig();
+      const scriptPath = resolveScriptPath(context.extensionPath);
+      const args = ["--read-file", filename, "--container", container];
+      if (config.serialPort) args.push("--port", config.serialPort);
+      const proc = spawn(config.pythonPath, [scriptPath, ...args], {
+        cwd: path.dirname(scriptPath),
+        shell: false,
+      });
+      const chunks: Buffer[] = [];
+      proc.stdout?.on("data", (d: Buffer) => chunks.push(d));
+      proc.stderr?.on("data", () => {});
+      proc.on("close", (code) => {
+        if (code === 0) resolve(Buffer.concat(chunks));
+        else reject(new Error(`read-file exited with ${code}`));
+      });
+      proc.on("error", reject);
+    });
+  };
+
+  // 将内容写入设备文件（供虚拟文件系统保存用）
+  const writeDeviceFileContent: WriteDeviceFile = (container: string, filename: string, content: Uint8Array): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const config = getConfig();
+      const scriptPath = resolveScriptPath(context.extensionPath);
+      const args = ["--write-file", filename, "--container", container];
+      if (config.serialPort) args.push("--port", config.serialPort);
+      const proc = spawn(config.pythonPath, [scriptPath, ...args], {
+        cwd: path.dirname(scriptPath),
+        shell: false,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      const stdin = proc.stdin;
+      if (!stdin) {
+        reject(new Error("No stdin"));
+        return;
+      }
+      stdin.write(content, (err) => {
+        if (err) reject(err);
+        else stdin.end();
+      });
+      proc.on("close", (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`write-file exited with ${code}`));
+      });
+      proc.on("error", reject);
+    });
+  };
+
+  // 虚拟文件系统：设备文件可在 IDE 中打开并保存回设备
+  const deviceFsProvider = new XinghanDeviceFileSystemProvider(readDeviceFileContent, writeDeviceFileContent);
+  context.subscriptions.push(
+    vscode.workspace.registerFileSystemProvider("xinghan-device", deviceFsProvider, { isCaseSensitive: true })
+  );
+
+  // 左侧边栏：两栏独立视图（星瀚助手 / 星瀚控制器）
+  const actionsTreeProvider = new XinghanActionsTreeProvider();
+  const deviceFilesTreeProvider = new XinghanDeviceFilesTreeProvider({
+    containers: CONTAINERS,
+    listDeviceFiles: listDeviceFilesForTree,
+  });
+  context.subscriptions.push(
+    vscode.window.registerTreeDataProvider("xinghan.actionsView", actionsTreeProvider)
+  );
+  context.subscriptions.push(
+    vscode.window.registerTreeDataProvider("xinghan.deviceFilesView", deviceFilesTreeProvider)
+  );
+
+  // 打开设备上的文件到编辑器（点击树节点或命令）
+  context.subscriptions.push(
+    vscode.commands.registerCommand("xinghan.openDeviceFile", async (container: string, filename: string) => {
+      const uri = toDeviceUri(container, filename);
+      const doc = await vscode.workspace.openTextDocument(uri);
+      await vscode.window.showTextDocument(doc, { preview: false });
+    })
+  );
+
+  // 保存设备文件后刷新侧边栏树
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument((doc) => {
+      if (doc.uri.scheme === "xinghan-device") {
+        deviceFilesTreeProvider.refresh();
+      }
+    })
+  );
+
   // 上传当前文件到星瀚（上传前会先停止正在运行的「在设备上运行」以释放串口）
   context.subscriptions.push(
     vscode.commands.registerCommand("xinghan.upload", async () => {
@@ -278,6 +391,7 @@ export function activate(context: vscode.ExtensionContext) {
 
       if (exitCode === 0) {
         vscode.window.showInformationMessage(`星瀚: 已上传到 ${container.container}`);
+        deviceFilesTreeProvider.refresh();
       } else {
         vscode.window.showErrorMessage("星瀚: 上传失败，请查看输出。");
       }
@@ -465,6 +579,41 @@ export function activate(context: vscode.ExtensionContext) {
 
       if (deleteExitCode === 0) {
         vscode.window.showInformationMessage(`星瀚: 已删除 ${container.container}/${fileToDelete.filename}`);
+        deviceFilesTreeProvider.refresh();
+      } else {
+        vscode.window.showErrorMessage("星瀚: 删除失败，请查看输出。");
+      }
+    })
+  );
+
+  // 从侧边栏树中删除设备上的文件（右键菜单）
+  context.subscriptions.push(
+    vscode.commands.registerCommand("xinghan.deleteFileFromTree", async (element: { kind: string; container?: string; name?: string }) => {
+      if (!element || element.kind !== "deviceFile" || !element.container || !element.name) return;
+      const config = getConfig();
+      const scriptPath = resolveScriptPath(context.extensionPath);
+      if (!(await ensureDependencies(config.pythonPath, channel))) return;
+      if (runOnDeviceProcess) {
+        channel.show(true);
+        channel.appendLine("正在停止设备上的运行以释放串口…");
+        await stopRunOnDeviceProcess(runOnDeviceProcess);
+        runOnDeviceProcess = null;
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      const confirm = await vscode.window.showWarningMessage(
+        `确定要删除 ${element.container}/${element.name} 吗？`,
+        { modal: true },
+        "删除"
+      );
+      if (confirm !== "删除") return;
+      channel.show(true);
+      channel.appendLine(`正在删除 ${element.name}...`);
+      const deleteArgs = ["--delete", element.name, "--container", element.container];
+      if (config.serialPort) deleteArgs.push("--port", config.serialPort);
+      const { exitCode } = await runPythonScript(config.pythonPath, scriptPath, deleteArgs, channel);
+      if (exitCode === 0) {
+        vscode.window.showInformationMessage(`星瀚: 已删除 ${element.container}/${element.name}`);
+        deviceFilesTreeProvider.refresh();
       } else {
         vscode.window.showErrorMessage("星瀚: 删除失败，请查看输出。");
       }
@@ -554,47 +703,56 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // 列出可用串口（供排查或配置用）
+  // 选择端口并进入 REPL（仅显示星瀚控制器端口：/dev/cu.usbmodem*）
   context.subscriptions.push(
-    vscode.commands.registerCommand("xinghan.listPorts", async () => {
+    vscode.commands.registerCommand("xinghan.selectPortAndRepl", async () => {
       const config = getConfig();
       const scriptPath = resolveScriptPath(context.extensionPath);
 
-      // 检查依赖
       if (!(await ensureDependencies(config.pythonPath, channel))) {
         return;
       }
 
-      channel.show(true);
-      channel.clear();
-      channel.appendLine("正在列出串口...");
+      const portsJson = await new Promise<string>((resolve, reject) => {
+        const proc = spawn(config.pythonPath, [scriptPath, "--list-ports-xinghan"], {
+          cwd: path.dirname(scriptPath),
+          shell: false,
+        });
+        const chunks: string[] = [];
+        proc.stdout?.on("data", (d: Buffer) => chunks.push(d.toString()));
+        proc.stderr?.on("data", () => {});
+        proc.on("close", (code) => {
+          if (code === 0) resolve(chunks.join(""));
+          else reject(new Error(`list-ports-xinghan exited with ${code}`));
+        });
+        proc.on("error", reject);
+      }).catch(() => "");
 
-      const { exitCode, stdout } = await runPythonScript(
-        config.pythonPath,
-        scriptPath,
-        ["--list-ports"],
-        channel
-      );
-
-      if (exitCode === 0) {
-        try {
-          const ports = JSON.parse(stdout.trim()) as Array<{ device: string; description: string }>;
-          if (ports.length === 0) {
-            vscode.window.showInformationMessage("未检测到串口设备。");
-            return;
-          }
-          const chosen = await vscode.window.showQuickPick(
-            ports.map((p) => ({ label: p.device, description: p.description, device: p.device })),
-            { title: "选择串口（可复制到设置 xinghan.serialPort）", matchOnDescription: true }
-          );
-          if (chosen) {
-            await vscode.env.clipboard.writeText(chosen.device);
-            vscode.window.showInformationMessage(`已复制到剪贴板: ${chosen.device}`);
-          }
-        } catch {
-          channel.appendLine("解析串口列表失败，原始输出见上。");
-        }
+      let ports: Array<{ device: string; description: string }>;
+      try {
+        const raw = portsJson.trim();
+        ports = raw ? (JSON.parse(raw) as Array<{ device: string; description: string }>) : [];
+      } catch {
+        ports = [];
       }
+
+      if (ports.length === 0) {
+        vscode.window.showWarningMessage("未找到星瀚控制器。请连接设备（/dev/cu.usbmodem*）后重试。");
+        return;
+      }
+
+      const chosen = await vscode.window.showQuickPick(
+        ports.map((p) => ({ label: p.device, description: p.description, device: p.device })),
+        { title: "选择星瀚控制器端口并进入 REPL", matchOnDescription: true }
+      );
+      if (!chosen) return;
+
+      const term = vscode.window.createTerminal({
+        name: "星瀚 REPL",
+        shellPath: config.pythonPath,
+        shellArgs: ["-m", "mpremote", "connect", chosen.device],
+      });
+      term.show();
     })
   );
 }

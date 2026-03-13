@@ -1,8 +1,8 @@
 {
   "name": "xinghan-upload",
-  "displayName": "星瀚上传",
+  "displayName": "星瀚助手",
   "description": "在 Cursor/VSCode 中一键上传代码到星瀚控制器 (ESP32 MicroPython)，上传逻辑由 Python 脚本 wired_uploader.py 完成",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "publisher": "XuChang0327",
   "icon": "logo.png",
   "license": "MIT",
@@ -19,32 +19,41 @@
   "contributes": {
     "commands": [
       {
-        "command": "xinghan.upload",
-        "title": "星瀚: 上传当前文件到控制器"
-      },
-      {
-        "command": "xinghan.runOnDevice",
-        "title": "星瀚: 在控制器上运行当前文件"
-      },
-      {
-        "command": "xinghan.stopRunOnDevice",
-        "title": "星瀚: 停止设备上的运行"
-      },
-      {
-        "command": "xinghan.deleteFile",
-        "title": "星瀚: 删除控制器上的文件"
-      },
-      {
-        "command": "xinghan.connectWifi",
-        "title": "星瀚: 连接 WiFi"
-      },
-      {
-        "command": "xinghan.listPorts",
-        "title": "星瀚: 列出可用串口"
+        "command": "xinghan.deleteFileFromTree",
+        "title": "删除"
       }
     ],
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "xinghan.deleteFileFromTree",
+          "when": "view == xinghan.deviceFilesView && viewItem == 'deviceFile'"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "xinghan-sidebar",
+          "title": "星瀚助手",
+          "icon": "logo.png"
+        }
+      ]
+    },
+    "views": {
+      "xinghan-sidebar": [
+        {
+          "id": "xinghan.actionsView",
+          "name": "星瀚助手"
+        },
+        {
+          "id": "xinghan.deviceFilesView",
+          "name": "星瀚控制器"
+        }
+      ]
+    },
     "configuration": {
-      "title": "星瀚上传",
+      "title": "星瀚助手",
       "properties": {
         "xinghan.pythonPath": {
           "type": "string",
@@ -107,7 +116,8 @@
     "esbuild-base": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
     "esbuild": "npm run esbuild-base -- --sourcemap",
     "esbuild-watch": "npm run esbuild-base -- --sourcemap --watch",
-    "package": "npx @vscode/vsce package --allow-missing-repository --skip-license"
+    "package": "npx @vscode/vsce package --allow-missing-repository --skip-license",
+    "publish:openvsx": "npx ovsx publish --no-dependencies"
   },
   "dependencies": {
     "tree-kill": "^1.0.1"

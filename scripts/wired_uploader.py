@@ -8,6 +8,7 @@ import os
 import sys
 import json
 import subprocess
+import tempfile
 import serial.tools.list_ports
 
 
@@ -16,6 +17,20 @@ def list_ports():
     result = []
     for p in serial.tools.list_ports.comports():
         result.append({"device": p.device, "description": p.description or p.device})
+    return result
+
+
+def list_ports_xinghan():
+    """
+    仅列出符合星瀚控制器规则的端口：设备路径为 /dev/cu.usbmodem*（或含 usbmodem）。
+    其他硬件不返回；若无则返回空列表。
+    """
+    result = []
+    for p in serial.tools.list_ports.comports():
+        device = p.device or ""
+        desc = (p.description or "").lower()
+        if "usbmodem" in device or "usbmodem" in desc:
+            result.append({"device": p.device, "description": p.description or p.device})
     return result
 
 
@@ -207,6 +222,80 @@ def list_files(container, port=None):
         return 4
 
 
+def read_file(container, filename, port=None):
+    """
+    从星瀚控制器读取指定容器中的文件内容，输出到 stdout（供插件在 IDE 中打开）。
+    :param container: 容器名
+    :param filename: 文件名
+    :param port: 串口；None 则自动检测
+    :return: 0 成功，非 0 失败
+    """
+    if container not in CONTAINERS:
+        print(f"❌ 错误：容器名必须是 {CONTAINERS} 之一", file=sys.stderr)
+        return 5
+
+    if not port:
+        port = get_default_port()
+    if not port:
+        print("❌ 错误：未检测到星瀚控制器！", file=sys.stderr)
+        return 2
+
+    remote_path = f":{container}/{filename}"
+    cmd = ["mpremote", "connect", port, "fs", "cat", remote_path]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        if result.stdout:
+            print(result.stdout, end="")
+        return 0
+    except subprocess.CalledProcessError as e:
+        print(f"❌ 读取失败：{e.stderr or e.stdout or str(e)}", file=sys.stderr)
+        return 3
+    except FileNotFoundError:
+        print("❌ 错误：未找到 mpremote 命令，请安装：pip install mpremote", file=sys.stderr)
+        return 4
+
+
+def write_file(container, filename, content, port=None):
+    """
+    将内容写入星瀚控制器指定容器的文件（不清空容器，仅覆盖该文件）。
+    :param container: 容器名
+    :param filename: 文件名
+    :param content: 文件内容（字符串）
+    :param port: 串口；None 则自动检测
+    :return: 0 成功，非 0 失败
+    """
+    if container not in CONTAINERS:
+        print(f"❌ 错误：容器名必须是 {CONTAINERS} 之一", file=sys.stderr)
+        return 5
+
+    if not port:
+        port = get_default_port()
+    if not port:
+        print("❌ 错误：未检测到星瀚控制器！", file=sys.stderr)
+        return 2
+
+    remote_path = f":{container}/{filename}"
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
+        f.write(content)
+        tmp = f.name
+    try:
+        cmd = ["mpremote", "connect", port, "fs", "cp", tmp, remote_path]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        return 0
+    except subprocess.CalledProcessError as e:
+        print(f"❌ 写入失败：{e.stderr or e.stdout or str(e)}", file=sys.stderr)
+        return 3
+    except FileNotFoundError:
+        print("❌ 错误：未找到 mpremote 命令，请安装：pip install mpremote", file=sys.stderr)
+        return 4
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
 def delete_file(container, filename, port=None):
     """
     删除星瀚控制器上指定容器中的文件。
@@ -295,7 +384,10 @@ def main():
     parser.add_argument("--container", "-c", choices=CONTAINERS, default="container1",
                         help="目标容器：container1～container5")
     parser.add_argument("--list-ports", "-l", action="store_true", help="列出可用串口（JSON）")
+    parser.add_argument("--list-ports-xinghan", action="store_true", help="仅列出星瀚控制器端口（/dev/cu.usbmodem*，JSON）")
     parser.add_argument("--list-files", action="store_true", help="列出指定容器中的文件（JSON）")
+    parser.add_argument("--read-file", metavar="FILENAME", help="从设备读取文件内容到 stdout")
+    parser.add_argument("--write-file", metavar="FILENAME", help="从 stdin 读取内容并写入设备（覆盖该文件）")
     parser.add_argument("--delete", "-d", metavar="FILENAME", help="删除指定容器中的文件")
     parser.add_argument("--run", "-r", action="store_true", help="在设备上直接运行文件（不写入设备存储）")
     parser.add_argument("--wifi", nargs=2, metavar=("SSID", "PASSWORD"), help="连接 WiFi：--wifi <名称> <密码>")
@@ -307,8 +399,20 @@ def main():
         print(json.dumps(ports, ensure_ascii=False))
         return 0
 
+    if args.list_ports_xinghan:
+        ports = list_ports_xinghan()
+        print(json.dumps(ports, ensure_ascii=False))
+        return 0
+
     if args.list_files:
         return list_files(args.container, port=args.port)
+
+    if args.read_file:
+        return read_file(args.container, args.read_file, port=args.port)
+
+    if args.write_file:
+        content = sys.stdin.read()
+        return write_file(args.container, args.write_file, content, port=args.port)
 
     if args.delete:
         return delete_file(args.container, args.delete, port=args.port)
