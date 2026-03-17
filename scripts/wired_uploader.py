@@ -20,6 +20,17 @@ def list_ports():
     return result
 
 
+def _short_display_for_device(device):
+    """从完整设备路径得到简短展示名，如 /dev/cu.usbmodem14101 -> 14101"""
+    if not device:
+        return device
+    if "usbmodem" in device:
+        idx = device.rfind("usbmodem")
+        suffix = device[idx + len("usbmodem"):]
+        return suffix if suffix else device.split("/")[-1]
+    return device.split("/")[-1] if "/" in device else device
+
+
 def list_ports_xinghan():
     """
     仅列出符合星瀚控制器规则的端口：设备路径为 /dev/cu.usbmodem*（或含 usbmodem）。
@@ -31,6 +42,25 @@ def list_ports_xinghan():
         desc = (p.description or "").lower()
         if "usbmodem" in device or "usbmodem" in desc:
             result.append({"device": p.device, "description": p.description or p.device})
+    return result
+
+
+def list_ports_xinghan_with_serial():
+    """
+    列出星瀚控制器端口，并带简短展示名与 USB 序列号（来自 pyserial，无需连设备）。
+    返回 [{"device", "display", "serial_number"}, ...]，serial_number 可能为 None。
+    """
+    result = []
+    for p in serial.tools.list_ports.comports():
+        device = p.device or ""
+        desc = (p.description or "").lower()
+        if "usbmodem" not in device and "usbmodem" not in desc:
+            continue
+        display = _short_display_for_device(device)
+        serial_number = getattr(p, "serial_number", None) if hasattr(p, "serial_number") else None
+        if serial_number is not None and not isinstance(serial_number, str):
+            serial_number = str(serial_number) if serial_number else None
+        result.append({"device": device, "display": display, "serial_number": serial_number})
     return result
 
 
@@ -409,6 +439,8 @@ def main():
                         help="目标容器：container1～container5")
     parser.add_argument("--list-ports", "-l", action="store_true", help="列出可用串口（JSON）")
     parser.add_argument("--list-ports-xinghan", action="store_true", help="仅列出星瀚控制器端口（/dev/cu.usbmodem*，JSON）")
+    parser.add_argument("--list-ports-xinghan-with-mac", action="store_true",
+                        help="列出星瀚控制器端口并带序列号（JSON：device, display, serial_number）")
     parser.add_argument("--list-files", action="store_true", help="列出指定容器中的文件（JSON）")
     parser.add_argument("--read-file", metavar="FILENAME", help="从设备读取文件内容到 stdout")
     parser.add_argument("--write-file", metavar="FILENAME", help="从 stdin 读取内容并写入设备（覆盖该文件）")
@@ -426,6 +458,11 @@ def main():
 
     if args.list_ports_xinghan:
         ports = list_ports_xinghan()
+        print(json.dumps(ports, ensure_ascii=False))
+        return 0
+
+    if args.list_ports_xinghan_with_mac:
+        ports = list_ports_xinghan_with_serial()
         print(json.dumps(ports, ensure_ascii=False))
         return 0
 

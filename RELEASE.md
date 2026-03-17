@@ -21,14 +21,21 @@ git push -u origin main
 
 ## 2. 发布到 Open VSX
 
-先打包生成 `.vsix`（见上），再发布：
+先打包生成 `.vsix`（见上），再发布。**若已将 token 添加到环境变量 `OVSX_PAT`**，直接执行：
 
 ```bash
-# 方式一：环境变量传入令牌（推荐）
+# 将 0.7.1 改为当前版本号
+npx ovsx publish xinghan-upload-0.7.1.vsix --no-dependencies
+```
+
+未配置环境变量时，可临时导出或命令行传入：
+
+```bash
+# 临时导出（仅当前终端有效）
 export OVSX_PAT="你的Open-VSX个人访问令牌"
 npx ovsx publish xinghan-upload-0.7.1.vsix --no-dependencies
 
-# 方式二：命令行传入（将 0.7.1 改为当前版本）
+# 或命令行传入
 npx ovsx publish xinghan-upload-0.7.1.vsix --no-dependencies -p 你的令牌
 ```
 

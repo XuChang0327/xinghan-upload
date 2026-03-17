@@ -2,25 +2,31 @@ import * as vscode from "vscode";
 
 const SCHEME = "xinghan-device";
 
-/** 从 xinghan-device URI 解析出 container 和 filename，例如 /container1/main.py -> { container: 'container1', filename: 'main.py' } */
-export function parseDeviceUri(uri: vscode.Uri): { container: string; filename: string } | null {
+/** 从 xinghan-device URI 解析出 port、container、filename，路径格式 /{encodeURIComponent(port)}/{container}/{filename} */
+export function parseDeviceUri(uri: vscode.Uri): { port: string; container: string; filename: string } | null {
   if (uri.scheme !== SCHEME) return null;
   const path = uri.path.replace(/^\/+/, "");
-  const i = path.indexOf("/");
-  if (i <= 0) return null;
-  const container = path.slice(0, i);
-  const filename = path.slice(i + 1).replace(/^\/+/, "");
-  if (!container || !filename) return null;
-  return { container, filename };
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length < 3) return null;
+  try {
+    const port = decodeURIComponent(parts[0]);
+    const container = parts[1];
+    const filename = parts.slice(2).join("/");
+    if (!port || !container || !filename) return null;
+    return { port, container, filename };
+  } catch {
+    return null;
+  }
 }
 
-/** 构建设备文件 URI */
-export function toDeviceUri(container: string, filename: string): vscode.Uri {
-  return vscode.Uri.parse(`${SCHEME}:/${container}/${filename}`);
+/** 构建设备文件 URI（含 port，以支持多设备） */
+export function toDeviceUri(port: string, container: string, filename: string): vscode.Uri {
+  const encoded = encodeURIComponent(port);
+  return vscode.Uri.parse(`${SCHEME}:/${encoded}/${container}/${filename}`);
 }
 
-export type ReadDeviceFile = (container: string, filename: string) => Promise<Uint8Array>;
-export type WriteDeviceFile = (container: string, filename: string, content: Uint8Array) => Promise<void>;
+export type ReadDeviceFile = (port: string, container: string, filename: string) => Promise<Uint8Array>;
+export type WriteDeviceFile = (port: string, container: string, filename: string, content: Uint8Array) => Promise<void>;
 
 /** 虚拟文件系统：设备上的文件，支持在 IDE 中打开与保存回设备 */
 export class XinghanDeviceFileSystemProvider implements vscode.FileSystemProvider {
@@ -54,7 +60,7 @@ export class XinghanDeviceFileSystemProvider implements vscode.FileSystemProvide
   async readFile(uri: vscode.Uri): Promise<Uint8Array> {
     const parsed = parseDeviceUri(uri);
     if (!parsed) throw vscode.FileSystemError.FileNotFound(uri);
-    return this.doRead(parsed.container, parsed.filename);
+    return this.doRead(parsed.port, parsed.container, parsed.filename);
   }
 
   async writeFile(
@@ -64,7 +70,7 @@ export class XinghanDeviceFileSystemProvider implements vscode.FileSystemProvide
   ): Promise<void> {
     const parsed = parseDeviceUri(uri);
     if (!parsed) throw vscode.FileSystemError.FileNotFound(uri);
-    await this.doWrite(parsed.container, parsed.filename, content);
+    await this.doWrite(parsed.port, parsed.container, parsed.filename, content);
   }
 
   createDirectory(_uri: vscode.Uri): void {
