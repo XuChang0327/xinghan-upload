@@ -36,7 +36,7 @@
 
 ### 从 VSIX 安装（推荐）
 
-1. 下载 `xinghan-upload-0.9.0.vsix`（或从 Releases 获取）
+1. 下载 `xinghan-upload-0.9.1.vsix`（或从 Releases 获取）
 2. 在 Cursor/VSCode 中：`Cmd+Shift+P`（Mac）或 `Ctrl+Shift+P`（Win/Linux）→ 输入 **Extensions: Install from VSIX...** → 选择 `.vsix` 文件
 3. 重新加载窗口后即可使用
 
@@ -75,9 +75,13 @@ npm run esbuild    # 编译
 npm run package    # 生成 .vsix
 ```
 
-会在当前目录生成 `xinghan-upload-0.9.0.vsix`，可分发给他人安装。
+会在当前目录生成 `xinghan-upload-0.9.1.vsix`，可分发给他人安装。
 
 ## 更新日志
+
+### v0.9.1
+- **连接状态**：在可用端口或「已连接端口」行上**右键**，选择 **「复制串口」**，将完整串口设备路径（如 `/dev/cu.usbmodem…`）复制到剪贴板
+- **修复**：设备文件虚拟 URI 中端口路径改为 base64url 编码，避免路径中出现非法 `//` 触发 `UriError`
 
 ### v0.9.0
 - **星瀚控制器多设备**：连接多个控制器时，树按「端口 → 容器 → 文件」展示，可分别查看每台设备；单设备时仍只显示「容器 → 文件」

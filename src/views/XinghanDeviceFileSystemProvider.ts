@@ -2,27 +2,47 @@ import * as vscode from "vscode";
 
 const SCHEME = "xinghan-device";
 
-/** 从 xinghan-device URI 解析出 port、container、filename，路径格式 /{encodeURIComponent(port)}/{container}/{filename} */
+/** 端口写入路径首段：不能用 encodeURIComponent(port) 直接拼进 URI，否则 %2F 解码后路径会以 // 开头，触发 UriError */
+function encodePortSegment(port: string): string {
+  return Buffer.from(port, "utf8").toString("base64url");
+}
+
+function decodePortSegment(segment: string): string | null {
+  try {
+    const decoded = Buffer.from(segment, "base64url").toString("utf8");
+    if (decoded.length > 0) return decoded;
+  } catch {
+    // ignore
+  }
+  try {
+    const legacy = decodeURIComponent(segment);
+    if (legacy.length > 0) return legacy;
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+/** 从 xinghan-device URI 解析出 port、container、filename，路径格式 /{base64url(port)}/{container}/{filename} */
 export function parseDeviceUri(uri: vscode.Uri): { port: string; container: string; filename: string } | null {
   if (uri.scheme !== SCHEME) return null;
   const path = uri.path.replace(/^\/+/, "");
   const parts = path.split("/").filter(Boolean);
   if (parts.length < 3) return null;
-  try {
-    const port = decodeURIComponent(parts[0]);
-    const container = parts[1];
-    const filename = parts.slice(2).join("/");
-    if (!port || !container || !filename) return null;
-    return { port, container, filename };
-  } catch {
-    return null;
-  }
+  const port = decodePortSegment(parts[0]);
+  const container = parts[1];
+  const filename = parts.slice(2).join("/");
+  if (!port || !container || !filename) return null;
+  return { port, container, filename };
 }
 
 /** 构建设备文件 URI（含 port，以支持多设备） */
 export function toDeviceUri(port: string, container: string, filename: string): vscode.Uri {
-  const encoded = encodeURIComponent(port);
-  return vscode.Uri.parse(`${SCHEME}:/${encoded}/${container}/${filename}`);
+  const seg = encodePortSegment(port);
+  return vscode.Uri.from({
+    scheme: SCHEME,
+    path: `/${seg}/${container}/${filename}`,
+  });
 }
 
 export type ReadDeviceFile = (port: string, container: string, filename: string) => Promise<Uint8Array>;

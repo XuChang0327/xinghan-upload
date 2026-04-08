@@ -54,10 +54,12 @@ export class XinghanActionsTreeProvider implements vscode.TreeDataProvider<Actio
 }
 
 /** 连接状态树节点（仅用于「连接状态」栏） */
-interface ConnectionStatusNode {
+export interface ConnectionStatusNode {
   label: string;
   description?: string;
   icon: string;
+  /** 完整串口设备路径，存在时右键可「复制串口」 */
+  portPath?: string;
 }
 
 /** 获取可用端口的函数（与 extension 中的 list-ports-xinghan-with-mac 一致，返回含 serial_number） */
@@ -91,12 +93,22 @@ export class ConnectionStatusTreeProvider implements vscode.TreeDataProvider<Con
     item.iconPath = new vscode.ThemeIcon(element.icon);
     if (element.description) item.description = element.description;
     item.tooltip = element.description ?? element.label;
+    if (element.portPath) {
+      item.contextValue = "connectionPort";
+    }
     return item;
   }
 
   getChildren(): ConnectionStatusNode[] | Promise<ConnectionStatusNode[]> {
     if (this._connectedPort) {
-      return [{ label: "已连接端口", description: this._connectedPort, icon: "plug" }];
+      return [
+        {
+          label: "已连接端口",
+          description: this._connectedPort,
+          icon: "plug",
+          portPath: this._connectedPort,
+        },
+      ];
     }
     if (this.listPorts) {
       return this.listPorts()
@@ -108,6 +120,7 @@ export class ConnectionStatusTreeProvider implements vscode.TreeDataProvider<Con
             label: formatPortLabel(p),
             description: p.device,
             icon: "plug" as const,
+            portPath: p.device,
           }));
         })
         .catch(() => [

@@ -6,6 +6,7 @@ import {
   XinghanActionsTreeProvider,
   XinghanDeviceFilesTreeProvider,
   ConnectionStatusTreeProvider,
+  type ConnectionStatusNode,
   type DeviceFileInfo,
 } from "./views/XinghanTreeProvider";
 import {
@@ -390,6 +391,18 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("xinghan.refreshDeviceFiles", () => {
       connectionStatusTreeProvider.refresh();
       deviceFilesTreeProvider.refresh();
+    })
+  );
+
+  // 连接状态栏：右键「复制串口」——复制完整设备路径到剪贴板
+  context.subscriptions.push(
+    vscode.commands.registerCommand("xinghan.copyConnectionPort", async (node: ConnectionStatusNode) => {
+      const path = node?.portPath;
+      if (!path) {
+        return;
+      }
+      await vscode.env.clipboard.writeText(path);
+      vscode.window.showInformationMessage(`已复制串口：${path}`);
     })
   );
 
