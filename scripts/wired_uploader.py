@@ -209,6 +209,40 @@ def run_on_device(local_file_path, port=None):
         return 4
 
 
+def _parse_ls_lines(stdout):
+    """解析 mpremote fs ls 输出为 [{name, size}, ...]。"""
+    files = []
+    for line in stdout.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) >= 2:
+            size = parts[0]
+            name = parts[1]
+            files.append({"name": name, "size": size})
+        elif len(parts) == 1:
+            files.append({"name": parts[0], "size": "?"})
+    return files
+
+
+def _list_container_files_meta(container, port):
+    """
+    列出指定容器中的文件元数据；port 可为 None 时内部自动检测。
+    :return: [{"name", "size"}, ...]
+    :raises: FileNotFoundError, CalledProcessError, ValueError, RuntimeError
+    """
+    if container not in CONTAINERS:
+        raise ValueError(f"容器名必须是 {CONTAINERS} 之一")
+    if not port:
+        port = get_default_port()
+    if not port:
+        raise RuntimeError("未检测到星瀚控制器")
+    cmd = ["mpremote", "connect", port, "fs", "ls", f":{container}/"]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    return _parse_ls_lines(result.stdout)
+
+
 def list_files(container, port=None):
     """
     列出星瀚控制器上指定容器中的文件（JSON 输出，供插件使用）。
@@ -220,28 +254,8 @@ def list_files(container, port=None):
         print(f"❌ 错误：容器名必须是 {CONTAINERS} 之一", file=sys.stderr)
         return 5
 
-    if not port:
-        port = get_default_port()
-    if not port:
-        print("❌ 错误：未检测到星瀚控制器！", file=sys.stderr)
-        return 2
-
-    cmd = ["mpremote", "connect", port, "fs", "ls", f":{container}/"]
-
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        files = []
-        for line in result.stdout.strip().split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            parts = line.split()
-            if len(parts) >= 2:
-                size = parts[0]
-                name = parts[1]
-                files.append({"name": name, "size": size})
-            elif len(parts) == 1:
-                files.append({"name": parts[0], "size": "?"})
+        files = _list_container_files_meta(container, port)
         print(json.dumps(files, ensure_ascii=False))
         return 0
     except subprocess.CalledProcessError as e:
@@ -250,6 +264,9 @@ def list_files(container, port=None):
     except FileNotFoundError:
         print("❌ 错误：未找到 mpremote 命令，请安装：pip install mpremote", file=sys.stderr)
         return 4
+    except (ValueError, RuntimeError) as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 2
 
 
 def read_file(container, filename, port=None):
@@ -324,6 +341,82 @@ def write_file(container, filename, content, port=None):
             os.unlink(tmp)
         except OSError:
             pass
+
+
+def _validate_device_py_filename(name):
+    """重命名/校验用：返回 None 表示合法，否则返回错误说明字符串。"""
+    if not name or name in ("（空）", "无法获取列表"):
+        return "无效文件名"
+    if name.strip() != name:
+        return "文件名首尾不能有空格"
+    if "/" in name or "\\" in name:
+        return "文件名不能包含路径分隔符"
+    if ".." in name:
+        return "文件名不能包含 .."
+    if not name.lower().endswith(".py"):
+        return "仅支持 .py 文件"
+    return None
+
+
+def _read_file_text_for_rename(container, filename, port):
+    """读取设备文件内容为字符串（供重命名复制）。"""
+    remote_path = f":{container}/{filename}"
+    cmd = ["mpremote", "connect", port, "fs", "cat", remote_path]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    return result.stdout if result.stdout is not None else ""
+
+
+def rename_file(container, old_name, new_name, port=None):
+    """
+    将设备上同一容器内的文件改名（读 → 写新名 → 删旧名；mpremote 无 fs mv 时的等价实现）。
+    :return: 0 成功，非 0 失败
+    """
+    err = _validate_device_py_filename(old_name) or _validate_device_py_filename(new_name)
+    if err:
+        print(f"❌ {err}", file=sys.stderr)
+        return 5
+    if old_name == new_name:
+        print("✅ 名称未变化，跳过")
+        return 0
+    if container not in CONTAINERS:
+        print(f"❌ 错误：容器名必须是 {CONTAINERS} 之一", file=sys.stderr)
+        return 5
+    if not port:
+        port = get_default_port()
+    if not port:
+        print("❌ 错误：未检测到星瀚控制器！", file=sys.stderr)
+        return 2
+
+    try:
+        meta = _list_container_files_meta(container, port)
+        names = {f["name"] for f in meta}
+        if old_name not in names:
+            print(f"❌ 设备上不存在文件：{container}/{old_name}", file=sys.stderr)
+            return 6
+        if new_name in names:
+            print(f"❌ 目标文件名已存在：{container}/{new_name}", file=sys.stderr)
+            return 7
+        content = _read_file_text_for_rename(container, old_name, port)
+        print(f"🔌 端口：{port}")
+        print(f"✏ 正在重命名 {container}/{old_name} → {new_name} ...")
+        w = write_file(container, new_name, content, port=port)
+        if w != 0:
+            return w
+        d = delete_file(container, old_name, port=port)
+        if d != 0:
+            print("⚠️ 新文件已写入但删除旧文件失败，请手动删除重复文件或查看输出。", file=sys.stderr)
+            return d
+        print(f"✅ 已重命名为 {container}/{new_name}")
+        return 0
+    except subprocess.CalledProcessError as e:
+        print(f"❌ 重命名失败：{e.stderr or e.stdout or str(e)}", file=sys.stderr)
+        return 3
+    except FileNotFoundError:
+        print("❌ 错误：未找到 mpremote 命令，请安装：pip install mpremote", file=sys.stderr)
+        return 4
+    except (ValueError, RuntimeError) as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 2
 
 
 def delete_file(container, filename, port=None):
@@ -445,6 +538,7 @@ def main():
     parser.add_argument("--read-file", metavar="FILENAME", help="从设备读取文件内容到 stdout")
     parser.add_argument("--write-file", metavar="FILENAME", help="从 stdin 读取内容并写入设备（覆盖该文件）")
     parser.add_argument("--delete", "-d", metavar="FILENAME", help="删除指定容器中的文件")
+    parser.add_argument("--rename", nargs=2, metavar=("OLD", "NEW"), help="在同一容器内重命名 .py 文件：旧名 新名")
     parser.add_argument("--run", "-r", action="store_true", help="在设备上直接运行文件（不写入设备存储）")
     parser.add_argument("--soft-reset", action="store_true", help="向设备发送软复位（停止设备上正在运行的程序）")
     parser.add_argument("--wifi", nargs=2, metavar=("SSID", "PASSWORD"), help="连接 WiFi：--wifi <名称> <密码>")
@@ -478,6 +572,10 @@ def main():
 
     if args.delete:
         return delete_file(args.container, args.delete, port=args.port)
+
+    if args.rename:
+        old_n, new_n = args.rename
+        return rename_file(args.container, old_n, new_n, port=args.port)
 
     if args.wifi:
         ssid, password = args.wifi

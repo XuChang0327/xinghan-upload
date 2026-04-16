@@ -6,11 +6,10 @@ export interface DeviceFileInfo {
   size: string;
 }
 
-/** 操作项节点（仅用于「星瀚助手」栏） */
+/** 操作项节点（仅用于「星瀚助手」栏；仅用 label 内 emoji 区分，不设置 ThemeIcon） */
 interface ActionItemNode {
   id: string;
   label: string;
-  icon: string;
   command: string;
   tooltip?: string;
 }
@@ -23,12 +22,12 @@ export type DeviceFileTreeNode =
   | { kind: "placeholder"; label: string; description?: string };
 
 const ACTION_ITEMS: ActionItemNode[] = [
-  { id: "run", label: "运行", icon: "play", command: "xinghan.runOnDevice", tooltip: "在控制器上运行当前打开的文件" },
-  { id: "stop", label: "停止", icon: "debug-stop", command: "xinghan.stopRunOnDevice", tooltip: "停止设备上正在运行的程序" },
-  { id: "upload", label: "上传", icon: "cloud-upload", command: "xinghan.upload", tooltip: "上传当前文件到星瀚控制器" },
-  { id: "wifi", label: "联网", icon: "radio-tower", command: "xinghan.connectWifi", tooltip: "向设备发送 WiFi 连接命令" },
-  { id: "selectPort", label: "连接 REPL", icon: "plug", command: "xinghan.selectPortAndRepl", tooltip: "选择星瀚控制器端口并进入 REPL" },
-  { id: "disconnectRepl", label: "断开 REPL", icon: "debug-disconnect", command: "xinghan.disconnectRepl", tooltip: "断开 REPL 终端并释放串口" },
+  { id: "run", label: "▶️ 星瀚运行", command: "xinghan.runOnDevice", tooltip: "在控制器上运行当前打开的文件" },
+  { id: "stop", label: "⏹️ 星瀚停止", command: "xinghan.stopRunOnDevice", tooltip: "停止设备上正在运行的程序" },
+  { id: "upload", label: "📤 星瀚上传", command: "xinghan.upload", tooltip: "上传当前文件到星瀚控制器" },
+  { id: "wifi", label: "📶 联网", command: "xinghan.connectWifi", tooltip: "向设备发送 WiFi 连接命令" },
+  { id: "selectPort", label: "🔌 连接 REPL", command: "xinghan.selectPortAndRepl", tooltip: "选择星瀚控制器端口并进入 REPL" },
+  { id: "disconnectRepl", label: "📴 断开 REPL", command: "xinghan.disconnectRepl", tooltip: "断开 REPL 终端并释放串口" },
 ];
 
 /** 「星瀚助手」栏：仅展示操作项，无分类节点 */
@@ -38,7 +37,6 @@ export class XinghanActionsTreeProvider implements vscode.TreeDataProvider<Actio
 
   getTreeItem(element: ActionItemNode): vscode.TreeItem {
     const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
-    item.iconPath = new vscode.ThemeIcon(element.icon);
     item.command = { command: element.command, title: element.label };
     item.tooltip = element.tooltip ?? element.label;
     return item;

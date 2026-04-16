@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "path";
+import * as fs from "fs";
 import { spawn, ChildProcess } from "child_process";
 import treeKill = require("tree-kill");
 import {
@@ -144,6 +145,42 @@ function getConfig() {
   };
 }
 
+/**
+ * 解析上传/运行要使用的本地文件路径：Explorer 右键会传入 Uri；编辑器无参则用当前活动编辑器。
+ * 多选时仅作用于右键目标文件（首参 Uri）。
+ */
+function resolveLocalFilePathForDevice(firstArg?: unknown, selectedResources?: unknown): string | null {
+  const multi =
+    Array.isArray(selectedResources) &&
+    selectedResources.length > 1 &&
+    selectedResources.every((u) => u instanceof vscode.Uri);
+
+  if (firstArg instanceof vscode.Uri && firstArg.scheme === "file") {
+    if (multi) {
+      vscode.window.showInformationMessage("星瀚: 已选择多个文件，仅对右键目标文件执行。");
+    }
+    try {
+      const stat = fs.statSync(firstArg.fsPath);
+      if (stat.isDirectory()) {
+        vscode.window.showWarningMessage("星瀚: 请选择文件，不能对文件夹执行。");
+        return null;
+      }
+    } catch {
+      vscode.window.showWarningMessage("星瀚: 无法访问该路径。");
+      return null;
+    }
+    return firstArg.fsPath;
+  }
+
+  const editor = vscode.window.activeTextEditor;
+  const docUri = editor?.document.uri;
+  if (!docUri || docUri.scheme !== "file") {
+    vscode.window.showWarningMessage("请先打开要操作的本地文件。");
+    return null;
+  }
+  return docUri.fsPath;
+}
+
 /** 获取上传脚本的绝对路径：优先使用插件内嵌脚本 */
 function resolveScriptPath(extensionPath: string): string {
   return path.join(extensionPath, "scripts", "wired_uploader.py");
@@ -223,30 +260,6 @@ export function activate(context: vscode.ExtensionContext) {
   /** 当前 REPL 终端与端口，用于「连接状态」展示与「断开 REPL」 */
   let replTerminal: vscode.Terminal | null = null;
   let replPort: string | null = null;
-
-  // 状态栏按钮：运行（左）- priority 越大越靠左
-  const runStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 10002);
-  runStatusBarItem.text = "$(play) 星瀚运行";
-  runStatusBarItem.tooltip = "星瀚: 在控制器上运行当前文件";
-  runStatusBarItem.command = "xinghan.runOnDevice";
-  runStatusBarItem.show();
-  context.subscriptions.push(runStatusBarItem);
-
-  // 状态栏按钮：停止（中）
-  const stopStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 10001);
-  stopStatusBarItem.text = "$(debug-stop) 星瀚停止";
-  stopStatusBarItem.tooltip = "星瀚: 停止设备上的运行";
-  stopStatusBarItem.command = "xinghan.stopRunOnDevice";
-  stopStatusBarItem.show();
-  context.subscriptions.push(stopStatusBarItem);
-
-  // 状态栏按钮：上传（右）
-  const uploadStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 10000);
-  uploadStatusBarItem.text = "$(cloud-upload) 星瀚上传";
-  uploadStatusBarItem.tooltip = "星瀚: 上传当前文件到控制器";
-  uploadStatusBarItem.command = "xinghan.upload";
-  uploadStatusBarItem.show();
-  context.subscriptions.push(uploadStatusBarItem);
 
   // 列出指定端口、容器中的文件（供侧边栏树使用）
   async function listDeviceFilesForTree(port: string, container: string): Promise<DeviceFileInfo[]> {
@@ -437,11 +450,9 @@ export function activate(context: vscode.ExtensionContext) {
 
   // 上传当前文件到星瀚（上传前会先停止正在运行的「在设备上运行」以释放串口）
   context.subscriptions.push(
-    vscode.commands.registerCommand("xinghan.upload", async () => {
-      const editor = vscode.window.activeTextEditor;
-      const filePath = editor?.document.uri.fsPath;
+    vscode.commands.registerCommand("xinghan.upload", async (firstArg?: unknown, selectedResources?: unknown) => {
+      const filePath = resolveLocalFilePathForDevice(firstArg, selectedResources);
       if (!filePath) {
-        vscode.window.showWarningMessage("请先打开要上传的文件。");
         return;
       }
 
@@ -493,7 +504,12 @@ export function activate(context: vscode.ExtensionContext) {
 
   // 在控制器上直接运行当前文件（不写入设备，实时输出）；再次执行会先停止当前运行再运行新脚本
   context.subscriptions.push(
-    vscode.commands.registerCommand("xinghan.runOnDevice", async () => {
+    vscode.commands.registerCommand("xinghan.runOnDevice", async (firstArg?: unknown, selectedResources?: unknown) => {
+      const filePath = resolveLocalFilePathForDevice(firstArg, selectedResources);
+      if (!filePath) {
+        return;
+      }
+
       const config = getConfig();
 
       // 检查依赖
@@ -513,13 +529,6 @@ export function activate(context: vscode.ExtensionContext) {
         await stopRunOnDeviceProcess(runOnDeviceProcess);
         runOnDeviceProcess = null;
         await new Promise((r) => setTimeout(r, 500));
-      }
-
-      const editor = vscode.window.activeTextEditor;
-      const filePath = editor?.document.uri.fsPath;
-      if (!filePath) {
-        vscode.window.showWarningMessage("请先打开要运行的文件。");
-        return;
       }
 
       const scriptPath = resolveScriptPath(context.extensionPath);
@@ -723,6 +732,73 @@ export function activate(context: vscode.ExtensionContext) {
         deviceFilesTreeProvider.refresh();
       } else {
         vscode.window.showErrorMessage("星瀚: 删除失败，请查看输出。");
+      }
+    })
+  );
+
+  /** 设备树重命名：新文件名校验（与 wired_uploader 一致） */
+  function validateDevicePyFilename(name: string): string | null {
+    const n = name.trim();
+    if (!n || n === "（空）" || n === "无法获取列表") return "无效文件名";
+    if (n !== name) return "文件名首尾不能有空格";
+    if (n.includes("/") || n.includes("\\")) return "文件名不能包含路径分隔符";
+    if (n.includes("..")) return "文件名不能包含 ..";
+    if (!n.toLowerCase().endsWith(".py")) return "仅支持 .py 文件";
+    return null;
+  }
+
+  // 从侧边栏树重命名设备上的文件（右键菜单）
+  context.subscriptions.push(
+    vscode.commands.registerCommand("xinghan.renameDeviceFileFromTree", async (element: { kind: string; port?: string; container?: string; name?: string }) => {
+      if (!element || element.kind !== "deviceFile" || !element.port || !element.container || !element.name) return;
+      const config = getConfig();
+      const scriptPath = resolveScriptPath(context.extensionPath);
+      if (!(await ensureDependencies(config.pythonPath, channel))) return;
+
+      const newNameRaw = await vscode.window.showInputBox({
+        title: "重命名设备文件",
+        prompt: `将 ${element.container}/${element.name} 改名为`,
+        value: element.name,
+        validateInput: (value) => validateDevicePyFilename(value) ?? undefined,
+      });
+      if (newNameRaw === undefined) return;
+      const newName = newNameRaw.trim();
+      const nameErr = validateDevicePyFilename(newName);
+      if (nameErr) {
+        vscode.window.showErrorMessage(`星瀚: ${nameErr}`);
+        return;
+      }
+      if (newName === element.name) {
+        vscode.window.showInformationMessage("名称未变化。");
+        return;
+      }
+
+      if (runOnDeviceProcess) {
+        channel.show(true);
+        channel.appendLine("正在停止设备上的运行以释放串口…");
+        await stopRunOnDeviceProcess(runOnDeviceProcess);
+        runOnDeviceProcess = null;
+        await new Promise((r) => setTimeout(r, 500));
+      }
+
+      channel.show(true);
+      channel.appendLine(`正在重命名 ${element.name} → ${newName}...`);
+      const renameArgs = ["--rename", element.name, newName, "--container", element.container, "--port", element.port];
+      const { exitCode } = await runPythonScript(config.pythonPath, scriptPath, renameArgs, channel);
+      if (exitCode === 0) {
+        vscode.window.showInformationMessage(`星瀚: 已重命名为 ${element.container}/${newName}`);
+        deviceFilesTreeProvider.refresh();
+        const oldUri = toDeviceUri(element.port, element.container, element.name);
+        const newUri = toDeviceUri(element.port, element.container, newName);
+        const ed = vscode.window.activeTextEditor;
+        if (ed && ed.document.uri.scheme === "xinghan-device" && ed.document.uri.toString() === oldUri.toString()) {
+          const col = ed.viewColumn;
+          await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+          const doc = await vscode.workspace.openTextDocument(newUri);
+          await vscode.window.showTextDocument(doc, { viewColumn: col, preview: false });
+        }
+      } else {
+        vscode.window.showErrorMessage("星瀚: 重命名失败，请查看输出。");
       }
     })
   );

@@ -2,7 +2,7 @@
   "name": "xinghan-upload",
   "displayName": "星瀚助手",
   "description": "在 Cursor/VSCode 中一键上传代码到星瀚控制器 (ESP32 MicroPython)，上传逻辑由 Python 脚本 wired_uploader.py 完成",
-  "version": "0.9.1",
+  "version": "0.9.5",
   "publisher": "XuChang0327",
   "icon": "logo.png",
   "license": "MIT",
@@ -19,12 +19,24 @@
   "contributes": {
     "commands": [
       {
+        "command": "xinghan.runOnDevice",
+        "title": "▶️ 星瀚运行"
+      },
+      {
+        "command": "xinghan.stopRunOnDevice",
+        "title": "⏹️ 星瀚停止"
+      },
+      {
+        "command": "xinghan.upload",
+        "title": "📤 星瀚上传"
+      },
+      {
         "command": "xinghan.deleteFileFromTree",
         "title": "删除"
       },
       {
         "command": "xinghan.disconnectRepl",
-        "title": "断开 REPL"
+        "title": "📴 断开 REPL"
       },
       {
         "command": "xinghan.refreshConnectionStatus",
@@ -39,6 +51,26 @@
       {
         "command": "xinghan.copyConnectionPort",
         "title": "复制串口"
+      },
+      {
+        "command": "xinghan.openDeviceFile",
+        "title": "星瀚: 打开设备文件"
+      },
+      {
+        "command": "xinghan.deleteFile",
+        "title": "星瀚: 删除设备文件"
+      },
+      {
+        "command": "xinghan.connectWifi",
+        "title": "📶 星瀚: 联网"
+      },
+      {
+        "command": "xinghan.selectPortAndRepl",
+        "title": "🔌 星瀚: 连接 REPL"
+      },
+      {
+        "command": "xinghan.renameDeviceFileFromTree",
+        "title": "✏️ 重命名"
       }
     ],
     "menus": {
@@ -56,13 +88,68 @@
       ],
       "view/item/context": [
         {
+          "command": "xinghan.renameDeviceFileFromTree",
+          "when": "view == xinghan.deviceFilesView && viewItem == 'deviceFile'",
+          "group": "0_deviceFile@1"
+        },
+        {
           "command": "xinghan.deleteFileFromTree",
-          "when": "view == xinghan.deviceFilesView && viewItem == 'deviceFile'"
+          "when": "view == xinghan.deviceFilesView && viewItem == 'deviceFile'",
+          "group": "0_deviceFile@2"
         },
         {
           "command": "xinghan.copyConnectionPort",
           "when": "view == xinghan.connectionStatusView && viewItem == 'connectionPort'"
         }
+      ],
+      "explorer/context": [
+        {
+          "command": "xinghan.runOnDevice",
+          "when": "resourceScheme == file && explorerResourceIsFolder == false",
+          "group": "0_xinghan.ctx@1"
+        },
+        {
+          "command": "xinghan.stopRunOnDevice",
+          "when": "resourceScheme == file && explorerResourceIsFolder == false",
+          "group": "0_xinghan.ctx@2"
+        },
+        {
+          "command": "xinghan.upload",
+          "when": "resourceScheme == file && explorerResourceIsFolder == false",
+          "group": "0_xinghan.ctx@3"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "xinghan.runOnDevice",
+          "when": "editorTextFocus && resourceScheme == file",
+          "group": "0_xinghan.ctx@1"
+        },
+        {
+          "command": "xinghan.stopRunOnDevice",
+          "when": "editorTextFocus && resourceScheme == file",
+          "group": "0_xinghan.ctx@2"
+        },
+        {
+          "command": "xinghan.upload",
+          "when": "editorTextFocus && resourceScheme == file",
+          "group": "0_xinghan.ctx@3"
+        }
+      ],
+      "commandPalette": [
+        { "command": "xinghan.runOnDevice", "when": "false" },
+        { "command": "xinghan.stopRunOnDevice", "when": "false" },
+        { "command": "xinghan.upload", "when": "false" },
+        { "command": "xinghan.deleteFileFromTree", "when": "false" },
+        { "command": "xinghan.disconnectRepl", "when": "false" },
+        { "command": "xinghan.refreshConnectionStatus", "when": "false" },
+        { "command": "xinghan.refreshDeviceFiles", "when": "false" },
+        { "command": "xinghan.copyConnectionPort", "when": "false" },
+        { "command": "xinghan.openDeviceFile", "when": "false" },
+        { "command": "xinghan.deleteFile", "when": "false" },
+        { "command": "xinghan.connectWifi", "when": "false" },
+        { "command": "xinghan.selectPortAndRepl", "when": "false" },
+        { "command": "xinghan.renameDeviceFileFromTree", "when": "false" }
       ]
     },
     "viewsContainers": {
