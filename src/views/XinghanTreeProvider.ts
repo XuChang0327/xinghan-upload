@@ -34,6 +34,12 @@ const ACTION_ITEMS: ActionItemNode[] = [
 export class XinghanActionsTreeProvider implements vscode.TreeDataProvider<ActionItemNode> {
   private _onDidChangeTreeData = new vscode.EventEmitter<ActionItemNode | undefined | void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+  private _isBluetoothConnected = false;
+
+  setBluetoothConnected(isConnected: boolean): void {
+    this._isBluetoothConnected = isConnected;
+    this.refresh();
+  }
 
   getTreeItem(element: ActionItemNode): vscode.TreeItem {
     const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
@@ -43,7 +49,16 @@ export class XinghanActionsTreeProvider implements vscode.TreeDataProvider<Actio
   }
 
   getChildren(): ActionItemNode[] {
-    return ACTION_ITEMS;
+    const bluetoothItem: ActionItemNode = this._isBluetoothConnected
+      ? { id: "toggleBluetooth", label: "⚪ 断开蓝牙", command: "xinghan.toggleBluetooth", tooltip: "断开当前蓝牙连接并恢复有线操作" }
+      : { id: "toggleBluetooth", label: "🔵 蓝牙连接", command: "xinghan.toggleBluetooth", tooltip: "通过蓝牙连接星瀚控制器" };
+    return [
+      ACTION_ITEMS[0],
+      ACTION_ITEMS[1],
+      ACTION_ITEMS[2],
+      bluetoothItem,
+      ...ACTION_ITEMS.slice(3),
+    ];
   }
 
   refresh(): void {
@@ -75,12 +90,18 @@ export class ConnectionStatusTreeProvider implements vscode.TreeDataProvider<Con
 
   private _connectedPort: string | null = null;
   private _connectedPortLabel: string | null = null;
+  private _bluetoothDevice: { name: string; address: string } | null = null;
 
   constructor(private listPorts?: ListPortsFn) {}
 
   setPort(port: string | null, label?: string): void {
     this._connectedPort = port;
     this._connectedPortLabel = port ? label ?? null : null;
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
+  setBluetoothDevice(device: { name: string; address: string } | null): void {
+    this._bluetoothDevice = device;
     this._onDidChangeTreeData.fire(undefined);
   }
 
@@ -100,6 +121,15 @@ export class ConnectionStatusTreeProvider implements vscode.TreeDataProvider<Con
   }
 
   getChildren(): ConnectionStatusNode[] | Promise<ConnectionStatusNode[]> {
+    if (this._bluetoothDevice) {
+      return [
+        {
+          label: `蓝牙已连接：${this._bluetoothDevice.name}`,
+          description: this._bluetoothDevice.address,
+          icon: "radio-tower",
+        },
+      ];
+    }
     if (this._connectedPort) {
       return [
         {
@@ -142,8 +172,14 @@ export interface XinghanDeviceFilesTreeDeps {
 export class XinghanDeviceFilesTreeProvider implements vscode.TreeDataProvider<DeviceFileTreeNode> {
   private _onDidChangeTreeData = new vscode.EventEmitter<DeviceFileTreeNode | undefined | void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+  private _bluetoothDevice: { name: string; address: string } | null = null;
 
   constructor(private deps: XinghanDeviceFilesTreeDeps) {}
+
+  setBluetoothDevice(device: { name: string; address: string } | null): void {
+    this._bluetoothDevice = device;
+    this._onDidChangeTreeData.fire(undefined);
+  }
 
   getTreeItem(element: DeviceFileTreeNode): vscode.TreeItem {
     if (element.kind === "placeholder") {
@@ -185,6 +221,15 @@ export class XinghanDeviceFilesTreeProvider implements vscode.TreeDataProvider<D
     if (!element) {
       const ports = await this.deps.listPorts();
       if (ports.length === 0) {
+        if (this._bluetoothDevice) {
+          return [
+            {
+              kind: "placeholder",
+              label: `蓝牙已连接：${this._bluetoothDevice.name}`,
+              description: "蓝牙模式支持上传、运行、停止；文件管理请使用 USB 有线连接",
+            },
+          ];
+        }
         return [{ kind: "placeholder", label: "没有连接控制器", description: "请连接设备后点击刷新" }];
       }
       if (ports.length === 1) {

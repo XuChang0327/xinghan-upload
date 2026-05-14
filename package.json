@@ -2,7 +2,7 @@
   "name": "xinghan-upload",
   "displayName": "星瀚助手",
   "description": "在 Cursor/VSCode 中一键上传代码到星瀚控制器 (ESP32 MicroPython)，上传逻辑由 Python 脚本 wired_uploader.py 完成",
-  "version": "0.9.5",
+  "version": "0.10.0",
   "publisher": "XuChang0327",
   "icon": "logo.png",
   "license": "MIT",
@@ -29,6 +29,18 @@
       {
         "command": "xinghan.upload",
         "title": "📤 星瀚上传"
+      },
+      {
+        "command": "xinghan.connectBluetooth",
+        "title": "🔵 星瀚: 蓝牙连接"
+      },
+      {
+        "command": "xinghan.toggleBluetooth",
+        "title": "星瀚: 切换蓝牙连接"
+      },
+      {
+        "command": "xinghan.disconnectBluetooth",
+        "title": "⚪ 星瀚: 断开蓝牙"
       },
       {
         "command": "xinghan.deleteFileFromTree",
@@ -137,19 +149,70 @@
         }
       ],
       "commandPalette": [
-        { "command": "xinghan.runOnDevice", "when": "false" },
-        { "command": "xinghan.stopRunOnDevice", "when": "false" },
-        { "command": "xinghan.upload", "when": "false" },
-        { "command": "xinghan.deleteFileFromTree", "when": "false" },
-        { "command": "xinghan.disconnectRepl", "when": "false" },
-        { "command": "xinghan.refreshConnectionStatus", "when": "false" },
-        { "command": "xinghan.refreshDeviceFiles", "when": "false" },
-        { "command": "xinghan.copyConnectionPort", "when": "false" },
-        { "command": "xinghan.openDeviceFile", "when": "false" },
-        { "command": "xinghan.deleteFile", "when": "false" },
-        { "command": "xinghan.connectWifi", "when": "false" },
-        { "command": "xinghan.selectPortAndRepl", "when": "false" },
-        { "command": "xinghan.renameDeviceFileFromTree", "when": "false" }
+        {
+          "command": "xinghan.runOnDevice",
+          "when": "false"
+        },
+        {
+          "command": "xinghan.stopRunOnDevice",
+          "when": "false"
+        },
+        {
+          "command": "xinghan.upload",
+          "when": "false"
+        },
+        {
+          "command": "xinghan.connectBluetooth",
+          "when": "false"
+        },
+        {
+          "command": "xinghan.toggleBluetooth",
+          "when": "false"
+        },
+        {
+          "command": "xinghan.disconnectBluetooth",
+          "when": "false"
+        },
+        {
+          "command": "xinghan.deleteFileFromTree",
+          "when": "false"
+        },
+        {
+          "command": "xinghan.disconnectRepl",
+          "when": "false"
+        },
+        {
+          "command": "xinghan.refreshConnectionStatus",
+          "when": "false"
+        },
+        {
+          "command": "xinghan.refreshDeviceFiles",
+          "when": "false"
+        },
+        {
+          "command": "xinghan.copyConnectionPort",
+          "when": "false"
+        },
+        {
+          "command": "xinghan.openDeviceFile",
+          "when": "false"
+        },
+        {
+          "command": "xinghan.deleteFile",
+          "when": "false"
+        },
+        {
+          "command": "xinghan.connectWifi",
+          "when": "false"
+        },
+        {
+          "command": "xinghan.selectPortAndRepl",
+          "when": "false"
+        },
+        {
+          "command": "xinghan.renameDeviceFileFromTree",
+          "when": "false"
+        }
       ]
     },
     "viewsContainers": {
@@ -192,6 +255,26 @@
           ],
           "default": null,
           "description": "指定串口（如 /dev/cu.usbmodem123、COM3）。留空则由脚本自动检测。"
+        },
+        "xinghan.bluetoothNamePrefix": {
+          "type": "string",
+          "default": "ybc-r2",
+          "description": "扫描蓝牙设备时使用的名称前缀；留空则显示扫描到的所有 BLE 设备。"
+        },
+        "xinghan.bluetoothScanTimeout": {
+          "type": "number",
+          "default": 6,
+          "description": "蓝牙扫描超时时间（秒）。"
+        },
+        "xinghan.bluetoothCommandTimeout": {
+          "type": "number",
+          "default": 8,
+          "description": "蓝牙 NUS 命令等待设备响应的超时时间（秒）。"
+        },
+        "xinghan.bluetoothRunContainer": {
+          "type": "string",
+          "default": "container1",
+          "description": "通过蓝牙运行当前文件时，用于临时上传运行脚本的容器。"
         },
         "xinghan.wifiPresets": {
           "type": "array",

@@ -34,7 +34,7 @@
 
 ### 从 VSIX 安装（推荐）
 
-1. 下载 `xinghan-upload-0.9.5.vsix`（或从 Releases 获取）
+1. 下载 `xinghan-upload-0.10.0.vsix`（或从 Releases 获取）
 2. 在 Cursor/VSCode 中：`Cmd+Shift+P`（Mac）或 `Ctrl+Shift+P`（Win/Linux）→ 输入 **Extensions: Install from VSIX...** → 选择 `.vsix` 文件
 3. 重新加载窗口后即可使用
 
@@ -47,9 +47,10 @@
 ## 环境要求
 
 - **Python 3**
-- **pyserial**、**mpremote**（首次使用时插件会检测并提示安装）
+- **pyserial**、**mpremote**（首次使用有线功能时插件会检测并提示安装）
+- **bleak**（首次使用蓝牙功能时插件会检测并提示安装）
 
-手动安装：`pip install pyserial mpremote`
+手动安装：`pip install pyserial mpremote bleak`
 
 星瀚控制器通过 USB 连接后，Mac 上一般为 `/dev/cu.usbmodem*`；插件仅识别此类端口，其他串口不会在「连接状态」与「连接 REPL」中显示。
 
@@ -61,6 +62,10 @@
 |--------|------|------|
 | `xinghan.pythonPath` | Python 解释器 | `python3` |
 | `xinghan.serialPort` | 指定串口，留空则自动检测 | 空 |
+| `xinghan.bluetoothNamePrefix` | 蓝牙扫描名称前缀 | `ybc-r2` |
+| `xinghan.bluetoothScanTimeout` | 蓝牙扫描超时时间（秒） | `6` |
+| `xinghan.bluetoothCommandTimeout` | 蓝牙命令超时时间（秒） | `8` |
+| `xinghan.bluetoothRunContainer` | 蓝牙运行临时上传容器 | `container1` |
 | `xinghan.wifiPresets` | 预设 WiFi 列表（`name`、`password`、`authMode`） | 见设置说明 |
 
 输出与日志在「输出」面板的 **星瀚助手** 通道查看。
@@ -73,11 +78,17 @@ npm run esbuild    # 编译
 npm run package    # 生成 .vsix
 ```
 
-会在当前目录生成 `xinghan-upload-0.9.5.vsix`，可分发给他人安装。
+会在当前目录生成 `xinghan-upload-0.10.0.vsix`，可分发给他人安装。
 
 ## 更新日志
 
-### v0.9.5（当前发行版，对应 VSIX / 市场版本）
+### v0.10.0（当前发行版，对应 VSIX / 市场版本）
+- **蓝牙模式**：新增基于 BLE Nordic UART Service 的蓝牙连接，设备名默认按 `ybc-r2` 前缀筛选
+- **蓝牙上传 / 运行 / 停止**：连接蓝牙后，运行、停止、上传优先通过蓝牙 NUS 文本透传执行；未连接蓝牙时仍默认使用 USB 有线流程
+- **侧栏交互**：蓝牙连接与断开合并为一个动态按钮；扫描过程会在「输出」面板显示进度提示
+- **文件管理边界**：控制器文件树仍优先使用 USB 有线连接，蓝牙模式不管理设备文件
+
+### v0.9.5
 - **命令面板**：所有 `xinghan.*` 命令从 Cmd/Ctrl+Shift+P 中隐藏（`commandPalette` + `when: false`），侧栏与右键不受影响
 - **星瀚控制器**：设备 `.py` 文件右键 **重命名**（`wired_uploader.py --rename`）；若活动编辑器正打开该设备文件，成功后切换为新文件名对应文档
 - **星瀚助手**侧栏：去掉每项左侧 ThemeIcon，文案使用 emoji（运行 / 停止 / 上传 / 联网 / 连接 REPL / 断开 REPL）；运行、停止、上传、重命名等命令标题不再使用 Codicon，避免与 emoji 重复
