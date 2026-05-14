@@ -253,6 +253,21 @@ function stopRunOnDeviceProcess(proc: ChildProcess): Promise<void> {
   });
 }
 
+function createCommandStatusBarItem(
+  context: vscode.ExtensionContext,
+  text: string,
+  command: string,
+  tooltip: string,
+  priority: number
+) {
+  const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, priority);
+  item.text = text;
+  item.command = command;
+  item.tooltip = tooltip;
+  item.show();
+  context.subscriptions.push(item);
+}
+
 export function activate(context: vscode.ExtensionContext) {
   const channel = vscode.window.createOutputChannel(OUTPUT_CHANNEL_NAME);
   /** 当前「在设备上运行」的进程，用于停止或上传前释放串口 */
@@ -260,6 +275,10 @@ export function activate(context: vscode.ExtensionContext) {
   /** 当前 REPL 终端与端口，用于「连接状态」展示与「断开 REPL」 */
   let replTerminal: vscode.Terminal | null = null;
   let replPort: string | null = null;
+
+  createCommandStatusBarItem(context, "▶️ 星瀚运行", "xinghan.runOnDevice", "在星瀚控制器上运行当前文件", 103);
+  createCommandStatusBarItem(context, "⏹️ 星瀚停止", "xinghan.stopRunOnDevice", "停止星瀚控制器上正在运行的程序", 102);
+  createCommandStatusBarItem(context, "📤 星瀚上传", "xinghan.upload", "上传当前文件到星瀚控制器", 101);
 
   // 列出指定端口、容器中的文件（供侧边栏树使用）
   async function listDeviceFilesForTree(port: string, container: string): Promise<DeviceFileInfo[]> {
