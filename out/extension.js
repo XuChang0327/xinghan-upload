@@ -282,37 +282,63 @@ function activate(context) {
     // 虚拟文件系统：设备文件可在 IDE 中打开并保存回设备
     const deviceFsProvider = new XinghanDeviceFileSystemProvider_1.XinghanDeviceFileSystemProvider(readDeviceFileContent, writeDeviceFileContent);
     context.subscriptions.push(vscode.workspace.registerFileSystemProvider("xinghan-device", deviceFsProvider, { isCaseSensitive: true }));
-    async function listXinghanPorts() {
-        const config = getConfig();
-        const scriptPath = resolveScriptPath(context.extensionPath);
-        const portsJson = await new Promise((resolve, reject) => {
-            const proc = (0, child_process_1.spawn)(config.pythonPath, [scriptPath, "--list-ports-xinghan-with-mac"], {
-                cwd: path.dirname(scriptPath),
-                shell: false,
-            });
-            const chunks = [];
-            proc.stdout?.on("data", (d) => chunks.push(d.toString()));
-            proc.stderr?.on("data", () => { });
-            proc.on("close", (code) => {
-                if (code === 0)
-                    resolve(chunks.join(""));
-                else
-                    reject(new Error(`list-ports-xinghan-with-mac exited with ${code}`));
-            });
-            proc.on("error", reject);
-        }).catch(() => "");
-        try {
-            const raw = portsJson.trim();
-            return raw ? JSON.parse(raw) : [];
-        }
-        catch {
-            return [];
-        }
+    const deviceIdCache = new Map();
+    let listXinghanPortsInFlight = null;
+    function cacheKeyForPort(p) {
+        return p.serial_number || p.device;
     }
-    /** 展示用：串口信息|序列号；无序列号时只显示串口信息 */
+    function applyCachedDeviceIds(ports) {
+        return ports.map((p) => {
+            const cacheKey = cacheKeyForPort(p);
+            if (p.device_id) {
+                deviceIdCache.set(cacheKey, p.device_id);
+                deviceIdCache.set(p.device, p.device_id);
+                return p;
+            }
+            const cachedDeviceId = deviceIdCache.get(cacheKey) ?? deviceIdCache.get(p.device);
+            return cachedDeviceId ? { ...p, device_id: cachedDeviceId } : p;
+        });
+    }
+    async function listXinghanPorts() {
+        if (!listXinghanPortsInFlight) {
+            listXinghanPortsInFlight = (async () => {
+                const config = getConfig();
+                const scriptPath = resolveScriptPath(context.extensionPath);
+                const portsJson = await new Promise((resolve, reject) => {
+                    const proc = (0, child_process_1.spawn)(config.pythonPath, [scriptPath, "--list-ports-xinghan-with-mac"], {
+                        cwd: path.dirname(scriptPath),
+                        shell: false,
+                    });
+                    const chunks = [];
+                    proc.stdout?.on("data", (d) => chunks.push(d.toString()));
+                    proc.stderr?.on("data", () => { });
+                    proc.on("close", (code) => {
+                        if (code === 0)
+                            resolve(chunks.join(""));
+                        else
+                            reject(new Error(`list-ports-xinghan-with-mac exited with ${code}`));
+                    });
+                    proc.on("error", reject);
+                }).catch(() => "");
+                try {
+                    const raw = portsJson.trim();
+                    const ports = raw ? JSON.parse(raw) : [];
+                    return applyCachedDeviceIds(ports);
+                }
+                catch {
+                    return [];
+                }
+            })().finally(() => {
+                listXinghanPortsInFlight = null;
+            });
+        }
+        return listXinghanPortsInFlight;
+    }
+    /** 展示用：优先显示设备 ID；读取失败时只回退到短串口号，避免展示难识别的 MAC */
     function formatPortLabel(p) {
-        const portPart = p.display ?? p.device;
-        return p.serial_number ? `${portPart} | ${p.serial_number}` : portPart;
+        if (p.device_id)
+            return p.device_id;
+        return p.display ?? p.device;
     }
     /** 上传或运行时解析端口：0 个返回 null；1 个直接返回；2 个以上弹出选择，返回所选或 null */
     async function resolvePortForUploadOrRun() {
@@ -753,7 +779,7 @@ function activate(context) {
         term.show();
         replTerminal = term;
         replPort = chosen.device;
-        connectionStatusTreeProvider.setPort(chosen.device);
+        connectionStatusTreeProvider.setPort(chosen.device, chosen.label);
     }));
     // 断开 REPL：关闭 REPL 终端并释放串口
     context.subscriptions.push(vscode.commands.registerCommand("xinghan.disconnectRepl", () => {

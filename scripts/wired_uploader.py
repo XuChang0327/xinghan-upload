@@ -31,6 +31,29 @@ def _short_display_for_device(device):
     return device.split("/")[-1] if "/" in device else device
 
 
+def read_xinghan_device_id(port, timeout=2):
+    """读取星瀚设备唯一编号；失败时返回 None，不影响串口枚举。"""
+    if not port:
+        return None
+    cmd = [
+        "mpremote", "connect", port,
+        "exec", "import r2; print(r2.device_id())",
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+        return None
+    if result.returncode != 0:
+        return None
+    lines = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+    if not lines:
+        return None
+    for line in reversed(lines):
+        if line.startswith("ybc-") or "-r2-" in line:
+            return line
+    return lines[-1]
+
+
 def list_ports_xinghan():
     """
     仅列出符合星瀚控制器规则的端口：设备路径为 /dev/cu.usbmodem*（或含 usbmodem）。
@@ -47,8 +70,8 @@ def list_ports_xinghan():
 
 def list_ports_xinghan_with_serial():
     """
-    列出星瀚控制器端口，并带简短展示名与 USB 序列号（来自 pyserial，无需连设备）。
-    返回 [{"device", "display", "serial_number"}, ...]，serial_number 可能为 None。
+    列出星瀚控制器端口，并带设备 ID、简短展示名与 USB 序列号。
+    返回 [{"device", "display", "serial_number", "device_id"}, ...]，device_id/serial_number 可能为 None。
     """
     result = []
     for p in serial.tools.list_ports.comports():
@@ -60,7 +83,13 @@ def list_ports_xinghan_with_serial():
         serial_number = getattr(p, "serial_number", None) if hasattr(p, "serial_number") else None
         if serial_number is not None and not isinstance(serial_number, str):
             serial_number = str(serial_number) if serial_number else None
-        result.append({"device": device, "display": display, "serial_number": serial_number})
+        device_id = read_xinghan_device_id(device)
+        result.append({
+            "device": device,
+            "display": display,
+            "serial_number": serial_number,
+            "device_id": device_id,
+        })
     return result
 
 

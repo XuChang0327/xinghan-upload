@@ -60,12 +60,12 @@ export interface ConnectionStatusNode {
   portPath?: string;
 }
 
-/** 获取可用端口的函数（与 extension 中的 list-ports-xinghan-with-mac 一致，返回含 serial_number） */
-export type ListPortsFn = () => Promise<Array<{ device: string; display?: string; serial_number?: string | null }>>;
+/** 获取可用端口的函数（与 extension 中的 list-ports-xinghan-with-mac 一致，返回含 device_id/serial_number） */
+export type ListPortsFn = () => Promise<Array<{ device: string; display?: string; serial_number?: string | null; device_id?: string | null }>>;
 
-function formatPortLabel(p: { device: string; display?: string; serial_number?: string | null }): string {
-  const portPart = p.display ?? p.device;
-  return p.serial_number ? `${portPart} | ${p.serial_number}` : portPart;
+function formatPortLabel(p: { device: string; display?: string; serial_number?: string | null; device_id?: string | null }): string {
+  if (p.device_id) return p.device_id;
+  return p.display ?? p.device;
 }
 
 /** 「连接状态」栏：一开始即展示可用端口；连接 REPL 后显示已连接端口 */
@@ -74,11 +74,13 @@ export class ConnectionStatusTreeProvider implements vscode.TreeDataProvider<Con
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private _connectedPort: string | null = null;
+  private _connectedPortLabel: string | null = null;
 
   constructor(private listPorts?: ListPortsFn) {}
 
-  setPort(port: string | null): void {
+  setPort(port: string | null, label?: string): void {
     this._connectedPort = port;
+    this._connectedPortLabel = port ? label ?? null : null;
     this._onDidChangeTreeData.fire(undefined);
   }
 
@@ -101,7 +103,7 @@ export class ConnectionStatusTreeProvider implements vscode.TreeDataProvider<Con
     if (this._connectedPort) {
       return [
         {
-          label: "已连接端口",
+          label: this._connectedPortLabel ?? "已连接端口",
           description: this._connectedPort,
           icon: "plug",
           portPath: this._connectedPort,
@@ -132,7 +134,7 @@ export class ConnectionStatusTreeProvider implements vscode.TreeDataProvider<Con
 /** 「星瀚控制器」栏依赖：支持按端口列出文件；多设备时先列端口再列容器 */
 export interface XinghanDeviceFilesTreeDeps {
   containers: string[];
-  listPorts: () => Promise<Array<{ device: string; display?: string; serial_number?: string | null }>>;
+  listPorts: () => Promise<Array<{ device: string; display?: string; serial_number?: string | null; device_id?: string | null }>>;
   listDeviceFiles: (port: string, container: string) => Promise<DeviceFileInfo[]>;
 }
 

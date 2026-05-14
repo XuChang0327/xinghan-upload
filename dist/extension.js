@@ -181,8 +181,8 @@ var XinghanActionsTreeProvider = class {
   }
 };
 function formatPortLabel(p) {
-  const portPart = p.display ?? p.device;
-  return p.serial_number ? `${portPart} | ${p.serial_number}` : portPart;
+  if (p.device_id) return p.device_id;
+  return p.display ?? p.device;
 }
 var ConnectionStatusTreeProvider = class {
   constructor(listPorts) {
@@ -190,9 +190,11 @@ var ConnectionStatusTreeProvider = class {
     this._onDidChangeTreeData = new vscode.EventEmitter();
     this.onDidChangeTreeData = this._onDidChangeTreeData.event;
     this._connectedPort = null;
+    this._connectedPortLabel = null;
   }
-  setPort(port) {
+  setPort(port, label) {
     this._connectedPort = port;
+    this._connectedPortLabel = port ? label ?? null : null;
     this._onDidChangeTreeData.fire(void 0);
   }
   refresh() {
@@ -212,7 +214,7 @@ var ConnectionStatusTreeProvider = class {
     if (this._connectedPort) {
       return [
         {
-          label: "\u5DF2\u8FDE\u63A5\u7AEF\u53E3",
+          label: this._connectedPortLabel ?? "\u5DF2\u8FDE\u63A5\u7AEF\u53E3",
           description: this._connectedPort,
           icon: "plug",
           portPath: this._connectedPort
@@ -655,34 +657,59 @@ function activate(context) {
   context.subscriptions.push(
     vscode3.workspace.registerFileSystemProvider("xinghan-device", deviceFsProvider, { isCaseSensitive: true })
   );
+  const deviceIdCache = /* @__PURE__ */ new Map();
+  let listXinghanPortsInFlight = null;
+  function cacheKeyForPort(p) {
+    return p.serial_number || p.device;
+  }
+  function applyCachedDeviceIds(ports) {
+    return ports.map((p) => {
+      const cacheKey = cacheKeyForPort(p);
+      if (p.device_id) {
+        deviceIdCache.set(cacheKey, p.device_id);
+        deviceIdCache.set(p.device, p.device_id);
+        return p;
+      }
+      const cachedDeviceId = deviceIdCache.get(cacheKey) ?? deviceIdCache.get(p.device);
+      return cachedDeviceId ? { ...p, device_id: cachedDeviceId } : p;
+    });
+  }
   async function listXinghanPorts() {
-    const config = getConfig();
-    const scriptPath = resolveScriptPath(context.extensionPath);
-    const portsJson = await new Promise((resolve, reject) => {
-      const proc = (0, import_child_process.spawn)(config.pythonPath, [scriptPath, "--list-ports-xinghan-with-mac"], {
-        cwd: path.dirname(scriptPath),
-        shell: false
+    if (!listXinghanPortsInFlight) {
+      listXinghanPortsInFlight = (async () => {
+        const config = getConfig();
+        const scriptPath = resolveScriptPath(context.extensionPath);
+        const portsJson = await new Promise((resolve, reject) => {
+          const proc = (0, import_child_process.spawn)(config.pythonPath, [scriptPath, "--list-ports-xinghan-with-mac"], {
+            cwd: path.dirname(scriptPath),
+            shell: false
+          });
+          const chunks = [];
+          proc.stdout?.on("data", (d) => chunks.push(d.toString()));
+          proc.stderr?.on("data", () => {
+          });
+          proc.on("close", (code) => {
+            if (code === 0) resolve(chunks.join(""));
+            else reject(new Error(`list-ports-xinghan-with-mac exited with ${code}`));
+          });
+          proc.on("error", reject);
+        }).catch(() => "");
+        try {
+          const raw = portsJson.trim();
+          const ports = raw ? JSON.parse(raw) : [];
+          return applyCachedDeviceIds(ports);
+        } catch {
+          return [];
+        }
+      })().finally(() => {
+        listXinghanPortsInFlight = null;
       });
-      const chunks = [];
-      proc.stdout?.on("data", (d) => chunks.push(d.toString()));
-      proc.stderr?.on("data", () => {
-      });
-      proc.on("close", (code) => {
-        if (code === 0) resolve(chunks.join(""));
-        else reject(new Error(`list-ports-xinghan-with-mac exited with ${code}`));
-      });
-      proc.on("error", reject);
-    }).catch(() => "");
-    try {
-      const raw = portsJson.trim();
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
     }
+    return listXinghanPortsInFlight;
   }
   function formatPortLabel2(p) {
-    const portPart = p.display ?? p.device;
-    return p.serial_number ? `${portPart} | ${p.serial_number}` : portPart;
+    if (p.device_id) return p.device_id;
+    return p.display ?? p.device;
   }
   async function resolvePortForUploadOrRun() {
     const ports = await listXinghanPorts();
@@ -1138,7 +1165,7 @@ function activate(context) {
       term.show();
       replTerminal = term;
       replPort = chosen.device;
-      connectionStatusTreeProvider.setPort(chosen.device);
+      connectionStatusTreeProvider.setPort(chosen.device, chosen.label);
     })
   );
   context.subscriptions.push(

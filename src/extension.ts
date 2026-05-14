@@ -348,37 +348,65 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.workspace.registerFileSystemProvider("xinghan-device", deviceFsProvider, { isCaseSensitive: true })
   );
 
-  // 列出星瀚控制器可用端口（含短展示名与 USB 序列号，供「连接状态」「星瀚控制器」与选择端口使用）
-  type PortInfo = { device: string; display?: string; serial_number?: string | null };
-  async function listXinghanPorts(): Promise<PortInfo[]> {
-    const config = getConfig();
-    const scriptPath = resolveScriptPath(context.extensionPath);
-    const portsJson = await new Promise<string>((resolve, reject) => {
-      const proc = spawn(config.pythonPath, [scriptPath, "--list-ports-xinghan-with-mac"], {
-        cwd: path.dirname(scriptPath),
-        shell: false,
-      });
-      const chunks: string[] = [];
-      proc.stdout?.on("data", (d: Buffer) => chunks.push(d.toString()));
-      proc.stderr?.on("data", () => {});
-      proc.on("close", (code) => {
-        if (code === 0) resolve(chunks.join(""));
-        else reject(new Error(`list-ports-xinghan-with-mac exited with ${code}`));
-      });
-      proc.on("error", reject);
-    }).catch(() => "");
-    try {
-      const raw = portsJson.trim();
-      return raw ? (JSON.parse(raw) as PortInfo[]) : [];
-    } catch {
-      return [];
-    }
+  // 列出星瀚控制器可用端口（含设备 ID、短展示名与 USB 序列号，供「连接状态」「星瀚控制器」与选择端口使用）
+  type PortInfo = { device: string; display?: string; serial_number?: string | null; device_id?: string | null };
+  const deviceIdCache = new Map<string, string>();
+  let listXinghanPortsInFlight: Promise<PortInfo[]> | null = null;
+
+  function cacheKeyForPort(p: PortInfo): string {
+    return p.serial_number || p.device;
   }
 
-  /** 展示用：串口信息|序列号；无序列号时只显示串口信息 */
+  function applyCachedDeviceIds(ports: PortInfo[]): PortInfo[] {
+    return ports.map((p) => {
+      const cacheKey = cacheKeyForPort(p);
+      if (p.device_id) {
+        deviceIdCache.set(cacheKey, p.device_id);
+        deviceIdCache.set(p.device, p.device_id);
+        return p;
+      }
+      const cachedDeviceId = deviceIdCache.get(cacheKey) ?? deviceIdCache.get(p.device);
+      return cachedDeviceId ? { ...p, device_id: cachedDeviceId } : p;
+    });
+  }
+
+  async function listXinghanPorts(): Promise<PortInfo[]> {
+    if (!listXinghanPortsInFlight) {
+      listXinghanPortsInFlight = (async () => {
+        const config = getConfig();
+        const scriptPath = resolveScriptPath(context.extensionPath);
+        const portsJson = await new Promise<string>((resolve, reject) => {
+          const proc = spawn(config.pythonPath, [scriptPath, "--list-ports-xinghan-with-mac"], {
+            cwd: path.dirname(scriptPath),
+            shell: false,
+          });
+          const chunks: string[] = [];
+          proc.stdout?.on("data", (d: Buffer) => chunks.push(d.toString()));
+          proc.stderr?.on("data", () => {});
+          proc.on("close", (code) => {
+            if (code === 0) resolve(chunks.join(""));
+            else reject(new Error(`list-ports-xinghan-with-mac exited with ${code}`));
+          });
+          proc.on("error", reject);
+        }).catch(() => "");
+        try {
+          const raw = portsJson.trim();
+          const ports = raw ? (JSON.parse(raw) as PortInfo[]) : [];
+          return applyCachedDeviceIds(ports);
+        } catch {
+          return [];
+        }
+      })().finally(() => {
+        listXinghanPortsInFlight = null;
+      });
+    }
+    return listXinghanPortsInFlight;
+  }
+
+  /** 展示用：优先显示设备 ID；读取失败时只回退到短串口号，避免展示难识别的 MAC */
   function formatPortLabel(p: PortInfo): string {
-    const portPart = p.display ?? p.device;
-    return p.serial_number ? `${portPart} | ${p.serial_number}` : portPart;
+    if (p.device_id) return p.device_id;
+    return p.display ?? p.device;
   }
 
   /** 上传或运行时解析端口：0 个返回 null；1 个直接返回；2 个以上弹出选择，返回所选或 null */
@@ -934,7 +962,7 @@ export function activate(context: vscode.ExtensionContext) {
       term.show();
       replTerminal = term;
       replPort = chosen.device;
-      connectionStatusTreeProvider.setPort(chosen.device);
+      connectionStatusTreeProvider.setPort(chosen.device, chosen.label);
     })
   );
 
