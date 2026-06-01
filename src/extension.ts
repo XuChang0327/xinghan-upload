@@ -325,13 +325,14 @@ function createCommandStatusBarItem(
   command: string,
   tooltip: string,
   priority: number
-) {
+): vscode.StatusBarItem {
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, priority);
   item.text = text;
   item.command = command;
   item.tooltip = tooltip;
   item.show();
   context.subscriptions.push(item);
+  return item;
 }
 
 interface BluetoothTarget {
@@ -348,9 +349,9 @@ export function activate(context: vscode.ExtensionContext) {
   let replPort: string | null = null;
   /** 当前已选择的蓝牙目标；存在时运行/停止/上传优先走 BLE NUS 通道 */
   let bluetoothTarget: BluetoothTarget | null = null;
+  let isBluetoothRunActive = false;
 
-  createCommandStatusBarItem(context, "▶️ 星瀚运行", "xinghan.runOnDevice", "在星瀚控制器上运行当前文件", 103);
-  createCommandStatusBarItem(context, "⏹️ 星瀚停止", "xinghan.stopRunOnDevice", "停止星瀚控制器上正在运行的程序", 102);
+  const runToggleStatusBarItem = createCommandStatusBarItem(context, "▶️ 星瀚运行", "xinghan.toggleRunOnDevice", "在星瀚控制器上运行当前文件", 103);
   createCommandStatusBarItem(context, "📤 星瀚上传", "xinghan.upload", "上传当前文件到星瀚控制器", 101);
 
   // 列出指定端口、容器中的文件（供侧边栏树使用）
@@ -535,6 +536,12 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.registerTreeDataProvider("xinghan.deviceFilesView", deviceFilesTreeProvider)
   );
 
+  function setRunOnDeviceActive(isActive: boolean): void {
+    actionsTreeProvider.setRunOnDeviceActive(isActive);
+    runToggleStatusBarItem.text = isActive ? "⏹️ 星瀚停止" : "▶️ 星瀚运行";
+    runToggleStatusBarItem.tooltip = isActive ? "停止设备上正在运行的程序" : "在星瀚控制器上运行当前文件";
+  }
+
   // 连接状态 / 星瀚控制器 的「刷新」按钮：任按其一都会同时刷新两栏
   context.subscriptions.push(
     vscode.commands.registerCommand("xinghan.refreshConnectionStatus", () => {
@@ -550,7 +557,19 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // 连接状态栏：右键「复制串口」——复制完整设备路径到剪贴板
+  // 连接状态栏：右键复制设备编号或串口信息
+  context.subscriptions.push(
+    vscode.commands.registerCommand("xinghan.copyConnectionDeviceId", async (node: ConnectionStatusNode) => {
+      const deviceId = node?.deviceId;
+      if (!deviceId) {
+        vscode.window.showWarningMessage("当前连接状态没有可复制的设备编号。");
+        return;
+      }
+      await vscode.env.clipboard.writeText(deviceId);
+      vscode.window.showInformationMessage(`已复制设备编号：${deviceId}`);
+    })
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand("xinghan.copyConnectionPort", async (node: ConnectionStatusNode) => {
       const path = node?.portPath;
@@ -640,7 +659,9 @@ export function activate(context: vscode.ExtensionContext) {
       }
       const name = bluetoothTarget.name;
       bluetoothTarget = null;
+      isBluetoothRunActive = false;
       actionsTreeProvider.setBluetoothConnected(false);
+      setRunOnDeviceActive(runOnDeviceProcess !== null);
       connectionStatusTreeProvider.setBluetoothDevice(null);
       deviceFilesTreeProvider.setBluetoothDevice(null);
       vscode.window.showInformationMessage(`星瀚: 已断开蓝牙设备 ${name}，恢复有线操作。`);
@@ -663,6 +684,7 @@ export function activate(context: vscode.ExtensionContext) {
       if (replTerminal && closed === replTerminal) {
         replTerminal = null;
         replPort = null;
+        actionsTreeProvider.setReplConnected(false);
         connectionStatusTreeProvider.setPort(null);
       }
     })
@@ -714,6 +736,7 @@ export function activate(context: vscode.ExtensionContext) {
           channel.appendLine("正在停止当前有线运行进程...");
           await stopRunOnDeviceProcess(runOnDeviceProcess);
           runOnDeviceProcess = null;
+          setRunOnDeviceActive(false);
         }
         const { exitCode } = await runBleScript([
           ...bluetoothArgs(bleTarget),
@@ -757,6 +780,7 @@ export function activate(context: vscode.ExtensionContext) {
         channel.appendLine("正在停止设备上的运行以释放串口…");
         await stopRunOnDeviceProcess(runOnDeviceProcess);
         runOnDeviceProcess = null;
+        setRunOnDeviceActive(false);
         await new Promise((r) => setTimeout(r, 500));
       }
 
@@ -790,6 +814,7 @@ export function activate(context: vscode.ExtensionContext) {
           channel.appendLine("[蓝牙运行] 正在停止当前有线运行进程...");
           await stopRunOnDeviceProcess(runOnDeviceProcess);
           runOnDeviceProcess = null;
+          setRunOnDeviceActive(false);
           await new Promise((r) => setTimeout(r, 500));
         }
 
@@ -804,8 +829,12 @@ export function activate(context: vscode.ExtensionContext) {
           config.bluetoothRunContainer,
         ]);
         if (exitCode === 0) {
+          isBluetoothRunActive = true;
+          setRunOnDeviceActive(true);
           vscode.window.showInformationMessage("星瀚: 蓝牙运行命令已发送");
         } else {
+          isBluetoothRunActive = false;
+          setRunOnDeviceActive(false);
           vscode.window.showErrorMessage("星瀚: 蓝牙运行失败，请查看输出。");
         }
         return;
@@ -827,6 +856,7 @@ export function activate(context: vscode.ExtensionContext) {
         channel.appendLine("[重新运行] 正在停止当前运行…");
         await stopRunOnDeviceProcess(runOnDeviceProcess);
         runOnDeviceProcess = null;
+        setRunOnDeviceActive(false);
         await new Promise((r) => setTimeout(r, 500));
       }
 
@@ -846,12 +876,15 @@ export function activate(context: vscode.ExtensionContext) {
         shell: false,
       });
       runOnDeviceProcess = proc;
+      isBluetoothRunActive = false;
+      setRunOnDeviceActive(true);
 
       proc.stdout?.on("data", (data: Buffer) => channel.append(data.toString()));
       proc.stderr?.on("data", (data: Buffer) => channel.append(data.toString()));
 
       proc.on("close", (code, signal) => {
         runOnDeviceProcess = null;
+        setRunOnDeviceActive(false);
         channel.appendLine("");
         channel.appendLine(`[退出码 ${code ?? "—"}${signal ? `，信号 ${signal}` : ""}]`);
         if (code === 0) {
@@ -863,6 +896,7 @@ export function activate(context: vscode.ExtensionContext) {
 
       proc.on("error", (err) => {
         runOnDeviceProcess = null;
+        setRunOnDeviceActive(false);
         channel.appendLine(`❌ 启动失败: ${err.message}`);
         vscode.window.showErrorMessage(`星瀚: 启动失败 — ${err.message}`);
       });
@@ -879,12 +913,15 @@ export function activate(context: vscode.ExtensionContext) {
           channel.appendLine("\n[蓝牙停止] 正在终止当前有线运行进程...");
           await stopRunOnDeviceProcess(runOnDeviceProcess);
           runOnDeviceProcess = null;
+          setRunOnDeviceActive(false);
           await new Promise((r) => setTimeout(r, 500));
         }
         channel.show(true);
         channel.appendLine(`\n正在通过蓝牙停止 ${bleTarget.name}...`);
         const { exitCode } = await runBleScript([...bluetoothArgs(bleTarget), "--stop"]);
         if (exitCode === 0) {
+          isBluetoothRunActive = false;
+          setRunOnDeviceActive(false);
           vscode.window.showInformationMessage("星瀚: 已通过蓝牙发送停止命令");
         } else {
           vscode.window.showErrorMessage("星瀚: 蓝牙停止失败，请查看输出。");
@@ -899,6 +936,7 @@ export function activate(context: vscode.ExtensionContext) {
       channel.appendLine("\n[用户请求停止] 正在终止本机进程并释放串口…");
       await stopRunOnDeviceProcess(runOnDeviceProcess);
       runOnDeviceProcess = null;
+      setRunOnDeviceActive(false);
       await new Promise((r) => setTimeout(r, 500));
 
       const config = getConfig();
@@ -912,6 +950,16 @@ export function activate(context: vscode.ExtensionContext) {
       });
       await new Promise<void>((resolve) => proc.on("close", () => resolve()));
       vscode.window.showInformationMessage("星瀚: 已停止设备上的运行");
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("xinghan.toggleRunOnDevice", async (firstArg?: unknown, selectedResources?: unknown) => {
+      if (runOnDeviceProcess || isBluetoothRunActive) {
+        await vscode.commands.executeCommand("xinghan.stopRunOnDevice");
+      } else {
+        await vscode.commands.executeCommand("xinghan.runOnDevice", firstArg, selectedResources);
+      }
     })
   );
 
@@ -932,6 +980,7 @@ export function activate(context: vscode.ExtensionContext) {
         channel.appendLine("正在停止设备上的运行以释放串口…");
         await stopRunOnDeviceProcess(runOnDeviceProcess);
         runOnDeviceProcess = null;
+        setRunOnDeviceActive(false);
         await new Promise((r) => setTimeout(r, 500));
       }
 
@@ -1033,6 +1082,7 @@ export function activate(context: vscode.ExtensionContext) {
         channel.appendLine("正在停止设备上的运行以释放串口…");
         await stopRunOnDeviceProcess(runOnDeviceProcess);
         runOnDeviceProcess = null;
+        setRunOnDeviceActive(false);
         await new Promise((r) => setTimeout(r, 500));
       }
       const confirm = await vscode.window.showWarningMessage(
@@ -1096,6 +1146,7 @@ export function activate(context: vscode.ExtensionContext) {
         channel.appendLine("正在停止设备上的运行以释放串口…");
         await stopRunOnDeviceProcess(runOnDeviceProcess);
         runOnDeviceProcess = null;
+        setRunOnDeviceActive(false);
         await new Promise((r) => setTimeout(r, 500));
       }
 
@@ -1139,6 +1190,7 @@ export function activate(context: vscode.ExtensionContext) {
         channel.appendLine("正在停止设备上的运行以释放串口…");
         await stopRunOnDeviceProcess(runOnDeviceProcess);
         runOnDeviceProcess = null;
+        setRunOnDeviceActive(false);
         await new Promise((r) => setTimeout(r, 500));
       }
 
@@ -1221,7 +1273,7 @@ export function activate(context: vscode.ExtensionContext) {
       }
 
       const chosen = await vscode.window.showQuickPick(
-        ports.map((p) => ({ label: formatPortLabel(p), description: p.device, device: p.device })),
+        ports.map((p) => ({ label: formatPortLabel(p), description: p.device, device: p.device, deviceId: p.device_id ?? formatPortLabel(p) })),
         { title: "选择星瀚控制器端口并进入 REPL", matchOnDescription: true }
       );
       if (!chosen) return;
@@ -1234,7 +1286,8 @@ export function activate(context: vscode.ExtensionContext) {
       term.show();
       replTerminal = term;
       replPort = chosen.device;
-      connectionStatusTreeProvider.setPort(chosen.device, chosen.label);
+      actionsTreeProvider.setReplConnected(true);
+      connectionStatusTreeProvider.setPort(chosen.device, chosen.label, chosen.deviceId);
     })
   );
 
@@ -1248,8 +1301,19 @@ export function activate(context: vscode.ExtensionContext) {
       replTerminal.dispose();
       replTerminal = null;
       replPort = null;
+      actionsTreeProvider.setReplConnected(false);
       connectionStatusTreeProvider.setPort(null);
       vscode.window.showInformationMessage("星瀚: 已断开 REPL，串口已释放。");
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("xinghan.toggleRepl", async () => {
+      if (replTerminal) {
+        await vscode.commands.executeCommand("xinghan.disconnectRepl");
+      } else {
+        await vscode.commands.executeCommand("xinghan.selectPortAndRepl");
+      }
     })
   );
 }

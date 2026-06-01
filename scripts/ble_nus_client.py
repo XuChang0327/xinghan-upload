@@ -25,6 +25,7 @@ NUS_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 DEFAULT_BLE_WRITE_SIZE = 20
 DEFAULT_FILE_CHUNK_SIZE = 72
 REPL_COMMAND_DELAY = 0.08
+UPLOAD_REPL_COMMAND_DELAY = 0.02
 CAPTURE_BEGIN = "__XINGHAN_BEGIN__"
 CAPTURE_END = "__XINGHAN_END__"
 
@@ -105,9 +106,9 @@ class NusSession:
     async def write_line(self, line: str):
         await self.write_text(line + "\n")
 
-    async def write_repl_line(self, line: str):
+    async def write_repl_line(self, line: str, delay: float = REPL_COMMAND_DELAY):
         await self.write_text(line + "\r\n")
-        await asyncio.sleep(REPL_COMMAND_DELAY)
+        await asyncio.sleep(delay)
 
     async def interrupt(self):
         await self.write_text("\x03\x03\r\n")
@@ -217,7 +218,10 @@ async def upload_file(address: str, file_path: str, container: str, timeout: flo
                 if not chunk:
                     break
                 encoded = base64.b64encode(chunk).decode("ascii")
-                await session.write_repl_line(f"_ = _f.write(ubinascii.a2b_base64({json.dumps(encoded)}))")
+                await session.write_repl_line(
+                    f"_ = _f.write(ubinascii.a2b_base64({json.dumps(encoded)}))",
+                    delay=UPLOAD_REPL_COMMAND_DELAY,
+                )
                 total += len(chunk)
                 if time.time() - started_at > 1.0:
                     print(f"已发送 {total} bytes", flush=True)
@@ -238,7 +242,10 @@ async def write_content(address: str, container: str, filename: str, content: by
         await session.write_repl_line(f"_f = open({json.dumps(remote_path)}, 'wb')")
         for i in range(0, len(content), DEFAULT_FILE_CHUNK_SIZE):
             encoded = base64.b64encode(content[i:i + DEFAULT_FILE_CHUNK_SIZE]).decode("ascii")
-            await session.write_repl_line(f"_ = _f.write(ubinascii.a2b_base64({json.dumps(encoded)}))")
+            await session.write_repl_line(
+                f"_ = _f.write(ubinascii.a2b_base64({json.dumps(encoded)}))",
+                delay=UPLOAD_REPL_COMMAND_DELAY,
+            )
         await session.write_repl_line("_f.close()")
         await session.write_repl_line(f"print({json.dumps('OK 写入完成：' + remote_path)})")
         await session.drain_logs(1.0)

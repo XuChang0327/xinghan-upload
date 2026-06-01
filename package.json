@@ -2,7 +2,7 @@
   "name": "xinghan-upload",
   "displayName": "星瀚助手",
   "description": "在 Cursor/VSCode 中一键上传代码到星瀚控制器 (ESP32 MicroPython)，上传逻辑由 Python 脚本 wired_uploader.py 完成",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "publisher": "XuChang0327",
   "icon": "logo.png",
   "license": "MIT",
@@ -25,6 +25,10 @@
       {
         "command": "xinghan.stopRunOnDevice",
         "title": "⏹️ 星瀚停止"
+      },
+      {
+        "command": "xinghan.toggleRunOnDevice",
+        "title": "星瀚: 切换运行状态"
       },
       {
         "command": "xinghan.upload",
@@ -51,6 +55,10 @@
         "title": "📴 断开 REPL"
       },
       {
+        "command": "xinghan.toggleRepl",
+        "title": "星瀚: 切换 REPL 连接"
+      },
+      {
         "command": "xinghan.refreshConnectionStatus",
         "title": "刷新",
         "icon": "$(refresh)"
@@ -61,8 +69,12 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "xinghan.copyConnectionDeviceId",
+        "title": "复制设备编号"
+      },
+      {
         "command": "xinghan.copyConnectionPort",
-        "title": "复制串口"
+        "title": "复制串口信息"
       },
       {
         "command": "xinghan.openDeviceFile",
@@ -110,8 +122,14 @@
           "group": "0_deviceFile@2"
         },
         {
+          "command": "xinghan.copyConnectionDeviceId",
+          "when": "view == xinghan.connectionStatusView && viewItem == 'connectionPort'",
+          "group": "0_connection@1"
+        },
+        {
           "command": "xinghan.copyConnectionPort",
-          "when": "view == xinghan.connectionStatusView && viewItem == 'connectionPort'"
+          "when": "view == xinghan.connectionStatusView && viewItem == 'connectionPort'",
+          "group": "0_connection@2"
         }
       ],
       "explorer/context": [
@@ -158,6 +176,10 @@
           "when": "false"
         },
         {
+          "command": "xinghan.toggleRunOnDevice",
+          "when": "false"
+        },
+        {
           "command": "xinghan.upload",
           "when": "false"
         },
@@ -182,11 +204,19 @@
           "when": "false"
         },
         {
+          "command": "xinghan.toggleRepl",
+          "when": "false"
+        },
+        {
           "command": "xinghan.refreshConnectionStatus",
           "when": "false"
         },
         {
           "command": "xinghan.refreshDeviceFiles",
+          "when": "false"
+        },
+        {
+          "command": "xinghan.copyConnectionDeviceId",
           "when": "false"
         },
         {

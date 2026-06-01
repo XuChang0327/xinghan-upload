@@ -22,22 +22,30 @@ export type DeviceFileTreeNode =
   | { kind: "placeholder"; label: string; description?: string };
 
 const ACTION_ITEMS: ActionItemNode[] = [
-  { id: "run", label: "▶️ 星瀚运行", command: "xinghan.runOnDevice", tooltip: "在控制器上运行当前打开的文件" },
-  { id: "stop", label: "⏹️ 星瀚停止", command: "xinghan.stopRunOnDevice", tooltip: "停止设备上正在运行的程序" },
   { id: "upload", label: "📤 星瀚上传", command: "xinghan.upload", tooltip: "上传当前文件到星瀚控制器" },
   { id: "wifi", label: "📶 联网", command: "xinghan.connectWifi", tooltip: "向设备发送 WiFi 连接命令" },
-  { id: "selectPort", label: "🔌 连接 REPL", command: "xinghan.selectPortAndRepl", tooltip: "选择星瀚控制器端口并进入 REPL" },
-  { id: "disconnectRepl", label: "📴 断开 REPL", command: "xinghan.disconnectRepl", tooltip: "断开 REPL 终端并释放串口" },
 ];
 
 /** 「星瀚助手」栏：仅展示操作项，无分类节点 */
 export class XinghanActionsTreeProvider implements vscode.TreeDataProvider<ActionItemNode> {
   private _onDidChangeTreeData = new vscode.EventEmitter<ActionItemNode | undefined | void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+  private _isRunOnDeviceActive = false;
   private _isBluetoothConnected = false;
+  private _isReplConnected = false;
+
+  setRunOnDeviceActive(isActive: boolean): void {
+    this._isRunOnDeviceActive = isActive;
+    this.refresh();
+  }
 
   setBluetoothConnected(isConnected: boolean): void {
     this._isBluetoothConnected = isConnected;
+    this.refresh();
+  }
+
+  setReplConnected(isConnected: boolean): void {
+    this._isReplConnected = isConnected;
     this.refresh();
   }
 
@@ -49,15 +57,21 @@ export class XinghanActionsTreeProvider implements vscode.TreeDataProvider<Actio
   }
 
   getChildren(): ActionItemNode[] {
+    const runItem: ActionItemNode = this._isRunOnDeviceActive
+      ? { id: "toggleRunOnDevice", label: "⏹️ 星瀚停止", command: "xinghan.toggleRunOnDevice", tooltip: "停止设备上正在运行的程序" }
+      : { id: "toggleRunOnDevice", label: "▶️ 星瀚运行", command: "xinghan.toggleRunOnDevice", tooltip: "在控制器上运行当前打开的文件" };
     const bluetoothItem: ActionItemNode = this._isBluetoothConnected
       ? { id: "toggleBluetooth", label: "⚪ 断开蓝牙", command: "xinghan.toggleBluetooth", tooltip: "断开当前蓝牙连接并恢复有线操作" }
       : { id: "toggleBluetooth", label: "🔵 蓝牙连接", command: "xinghan.toggleBluetooth", tooltip: "通过蓝牙连接星瀚控制器" };
+    const replItem: ActionItemNode = this._isReplConnected
+      ? { id: "toggleRepl", label: "📴 断开 REPL", command: "xinghan.toggleRepl", tooltip: "断开 REPL 终端并释放串口" }
+      : { id: "toggleRepl", label: "🔌 连接 REPL", command: "xinghan.toggleRepl", tooltip: "选择星瀚控制器端口并进入 REPL" };
     return [
+      runItem,
       ACTION_ITEMS[0],
-      ACTION_ITEMS[1],
-      ACTION_ITEMS[2],
+      replItem,
       bluetoothItem,
-      ...ACTION_ITEMS.slice(3),
+      ACTION_ITEMS[1],
     ];
   }
 
@@ -71,6 +85,8 @@ export interface ConnectionStatusNode {
   label: string;
   description?: string;
   icon: string;
+  /** 设备唯一编号，存在时右键可「复制设备编号」 */
+  deviceId?: string;
   /** 完整串口设备路径，存在时右键可「复制串口」 */
   portPath?: string;
 }
@@ -90,13 +106,15 @@ export class ConnectionStatusTreeProvider implements vscode.TreeDataProvider<Con
 
   private _connectedPort: string | null = null;
   private _connectedPortLabel: string | null = null;
+  private _connectedDeviceId: string | null = null;
   private _bluetoothDevice: { name: string; address: string } | null = null;
 
   constructor(private listPorts?: ListPortsFn) {}
 
-  setPort(port: string | null, label?: string): void {
+  setPort(port: string | null, label?: string, deviceId?: string): void {
     this._connectedPort = port;
     this._connectedPortLabel = port ? label ?? null : null;
+    this._connectedDeviceId = port ? deviceId ?? label ?? null : null;
     this._onDidChangeTreeData.fire(undefined);
   }
 
@@ -136,6 +154,7 @@ export class ConnectionStatusTreeProvider implements vscode.TreeDataProvider<Con
           label: this._connectedPortLabel ?? "已连接端口",
           description: this._connectedPort,
           icon: "plug",
+          deviceId: this._connectedDeviceId ?? this._connectedPortLabel ?? undefined,
           portPath: this._connectedPort,
         },
       ];
@@ -150,6 +169,7 @@ export class ConnectionStatusTreeProvider implements vscode.TreeDataProvider<Con
             label: formatPortLabel(p),
             description: p.device,
             icon: "plug" as const,
+            deviceId: p.device_id ?? formatPortLabel(p),
             portPath: p.device,
           }));
         })
