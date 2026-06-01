@@ -344,7 +344,7 @@ export function activate(context: vscode.ExtensionContext) {
   const channel = vscode.window.createOutputChannel(OUTPUT_CHANNEL_NAME);
   /** 当前「在设备上运行」的进程，用于停止或上传前释放串口 */
   let runOnDeviceProcess: ChildProcess | null = null;
-  /** 当前 REPL 终端与端口，用于「连接状态」展示与「断开 REPL」 */
+  /** 当前 REPL 终端与端口，用于「连接状态」展示与「REPL断开」 */
   let replTerminal: vscode.Terminal | null = null;
   let replPort: string | null = null;
   /** 当前已选择的蓝牙目标；存在时运行/停止/上传优先走 BLE NUS 通道 */
@@ -1257,7 +1257,7 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // 连接 REPL：选择端口并进入 REPL（仅显示星瀚控制器端口：/dev/cu.usbmodem*）
+  // REPL连接：选择端口并进入 REPL（仅显示星瀚控制器端口：/dev/cu.usbmodem*）
   context.subscriptions.push(
     vscode.commands.registerCommand("xinghan.selectPortAndRepl", async () => {
       const config = getConfig();
@@ -1291,7 +1291,7 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // 断开 REPL：关闭 REPL 终端并释放串口
+  // REPL断开：关闭 REPL 终端并释放串口
   context.subscriptions.push(
     vscode.commands.registerCommand("xinghan.disconnectRepl", () => {
       if (!replTerminal) {
@@ -1303,7 +1303,7 @@ export function activate(context: vscode.ExtensionContext) {
       replPort = null;
       actionsTreeProvider.setReplConnected(false);
       connectionStatusTreeProvider.setPort(null);
-      vscode.window.showInformationMessage("星瀚: 已断开 REPL，串口已释放。");
+      vscode.window.showInformationMessage("星瀚: REPL已断开，串口已释放。");
     })
   );
 

@@ -2,7 +2,7 @@
   "name": "xinghan-upload",
   "displayName": "星瀚助手",
   "description": "在 Cursor/VSCode 中一键上传代码到星瀚控制器 (ESP32 MicroPython)，上传逻辑由 Python 脚本 wired_uploader.py 完成",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "publisher": "XuChang0327",
   "icon": "logo.png",
   "license": "MIT",
@@ -52,11 +52,11 @@
       },
       {
         "command": "xinghan.disconnectRepl",
-        "title": "📴 断开 REPL"
+        "title": "📴 REPL断开"
       },
       {
         "command": "xinghan.toggleRepl",
-        "title": "星瀚: 切换 REPL 连接"
+        "title": "星瀚: 切换 REPL连接"
       },
       {
         "command": "xinghan.refreshConnectionStatus",
@@ -86,11 +86,11 @@
       },
       {
         "command": "xinghan.connectWifi",
-        "title": "📶 星瀚: 联网"
+        "title": "📶 星瀚: WiFi连接"
       },
       {
         "command": "xinghan.selectPortAndRepl",
-        "title": "🔌 星瀚: 连接 REPL"
+        "title": "🔌 星瀚: REPL连接"
       },
       {
         "command": "xinghan.renameDeviceFileFromTree",
@@ -317,6 +317,11 @@
             {
               "name": "YBC",
               "password": "YBC123456@@",
+              "authMode": 3
+            },
+            {
+              "name": "XC的iPhone",
+              "password": "79798080",
               "authMode": 3
             }
           ],

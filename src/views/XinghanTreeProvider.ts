@@ -23,7 +23,7 @@ export type DeviceFileTreeNode =
 
 const ACTION_ITEMS: ActionItemNode[] = [
   { id: "upload", label: "📤 星瀚上传", command: "xinghan.upload", tooltip: "上传当前文件到星瀚控制器" },
-  { id: "wifi", label: "📶 联网", command: "xinghan.connectWifi", tooltip: "向设备发送 WiFi 连接命令" },
+  { id: "wifi", label: "📶 WiFi连接", command: "xinghan.connectWifi", tooltip: "向设备发送 WiFi 连接命令" },
 ];
 
 /** 「星瀚助手」栏：仅展示操作项，无分类节点 */
@@ -64,8 +64,8 @@ export class XinghanActionsTreeProvider implements vscode.TreeDataProvider<Actio
       ? { id: "toggleBluetooth", label: "⚪ 断开蓝牙", command: "xinghan.toggleBluetooth", tooltip: "断开当前蓝牙连接并恢复有线操作" }
       : { id: "toggleBluetooth", label: "🔵 蓝牙连接", command: "xinghan.toggleBluetooth", tooltip: "通过蓝牙连接星瀚控制器" };
     const replItem: ActionItemNode = this._isReplConnected
-      ? { id: "toggleRepl", label: "📴 断开 REPL", command: "xinghan.toggleRepl", tooltip: "断开 REPL 终端并释放串口" }
-      : { id: "toggleRepl", label: "🔌 连接 REPL", command: "xinghan.toggleRepl", tooltip: "选择星瀚控制器端口并进入 REPL" };
+      ? { id: "toggleRepl", label: "📴 REPL断开", command: "xinghan.toggleRepl", tooltip: "关闭 REPL 终端并释放串口" }
+      : { id: "toggleRepl", label: "🔌 REPL连接", command: "xinghan.toggleRepl", tooltip: "选择星瀚控制器端口并进入 REPL" };
     return [
       runItem,
       ACTION_ITEMS[0],
@@ -99,7 +99,7 @@ function formatPortLabel(p: { device: string; display?: string; serial_number?: 
   return p.display ?? p.device;
 }
 
-/** 「连接状态」栏：一开始即展示可用端口；连接 REPL 后显示已连接端口 */
+/** 「连接状态」栏：一开始即展示可用端口；REPL连接后显示已连接端口 */
 export class ConnectionStatusTreeProvider implements vscode.TreeDataProvider<ConnectionStatusNode> {
   private _onDidChangeTreeData = new vscode.EventEmitter<ConnectionStatusNode | undefined | void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
