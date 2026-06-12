@@ -24,7 +24,7 @@ git push -u origin main
 先打包生成 `.vsix`（见上），再发布。**若已将 token 添加到环境变量 `OVSX_PAT`**，直接执行：
 
 ```bash
-npx ovsx publish xinghan-upload-0.11.1.vsix --no-dependencies
+npx ovsx publish xinghan-upload-0.12.0.vsix --no-dependencies
 ```
 
 未配置环境变量时，可临时导出或命令行传入：
@@ -32,10 +32,10 @@ npx ovsx publish xinghan-upload-0.11.1.vsix --no-dependencies
 ```bash
 # 临时导出（仅当前终端有效）
 export OVSX_PAT="你的Open-VSX个人访问令牌"
-npx ovsx publish xinghan-upload-0.11.1.vsix --no-dependencies
+npx ovsx publish xinghan-upload-0.12.0.vsix --no-dependencies
 
 # 或命令行传入
-npx ovsx publish xinghan-upload-0.11.1.vsix --no-dependencies -p 你的令牌
+npx ovsx publish xinghan-upload-0.12.0.vsix --no-dependencies -p 你的令牌
 ```
 
 - 令牌获取：<https://open-vsx.org/user-settings/tokens>
@@ -54,6 +54,6 @@ npx @vscode/vsce publish --allow-missing-repository --skip-license
 
 ## 4. 发布前检查
 
-- [ ] `package.json` 中 `version` 已改为新版本（如 `0.11.1`）
+- [ ] `package.json` 中 `version` 已改为新版本（如 `0.12.0`）
 - [ ] `README.md` 中「安装」与「打包」处的 vsix 文件名、更新日志已更新
 - [ ] 执行 `npm run esbuild && npm run package` 无报错
