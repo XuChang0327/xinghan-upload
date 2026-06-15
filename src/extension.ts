@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import { spawn, ChildProcess } from "child_process";
+import { StringDecoder } from "string_decoder";
 import treeKill = require("tree-kill");
 import {
   XinghanActionsTreeProvider,
@@ -32,6 +33,14 @@ function outputWarn(channel: vscode.OutputChannel, message: string): void {
 function outputError(channel: vscode.OutputChannel, message: string): void {
   channel.show(true);
   channel.appendLine(`[错误] ${message}`);
+}
+
+function decodeUtf8Chunk(decoder: StringDecoder, data: Buffer): string {
+  return decoder.write(data);
+}
+
+function flushUtf8Decoder(decoder: StringDecoder): string {
+  return decoder.end();
 }
 
 const CONTAINERS = ["container1", "container2", "container3", "container4", "container5"];
@@ -312,19 +321,31 @@ function runPythonScript(
 
     let stdout = "";
     let stderr = "";
+    const stdoutDecoder = new StringDecoder("utf8");
+    const stderrDecoder = new StringDecoder("utf8");
 
     proc.stdout?.on("data", (data: Buffer) => {
-      const text = data.toString();
+      const text = decodeUtf8Chunk(stdoutDecoder, data);
       stdout += text;
       channel.append(text);
     });
     proc.stderr?.on("data", (data: Buffer) => {
-      const text = data.toString();
+      const text = decodeUtf8Chunk(stderrDecoder, data);
       stderr += text;
       channel.append(text);
     });
 
     proc.on("close", (code, signal) => {
+      const stdoutTail = flushUtf8Decoder(stdoutDecoder);
+      const stderrTail = flushUtf8Decoder(stderrDecoder);
+      if (stdoutTail) {
+        stdout += stdoutTail;
+        channel.append(stdoutTail);
+      }
+      if (stderrTail) {
+        stderr += stderrTail;
+        channel.append(stderrTail);
+      }
       if (code !== undefined) {
         channel.appendLine("");
         channel.appendLine(`[退出码 ${code}]`);
@@ -968,10 +989,26 @@ export function activate(context: vscode.ExtensionContext) {
       isBluetoothRunActive = false;
       setRunOnDeviceActive(true);
 
-      proc.stdout?.on("data", (data: Buffer) => channel.append(data.toString()));
-      proc.stderr?.on("data", (data: Buffer) => channel.append(data.toString()));
+      const runStdoutDecoder = new StringDecoder("utf8");
+      const runStderrDecoder = new StringDecoder("utf8");
+      proc.stdout?.on("data", (data: Buffer) => {
+        const text = decodeUtf8Chunk(runStdoutDecoder, data);
+        channel.append(text);
+      });
+      proc.stderr?.on("data", (data: Buffer) => {
+        const text = decodeUtf8Chunk(runStderrDecoder, data);
+        channel.append(text);
+      });
 
       proc.on("close", (code, signal) => {
+        const stdoutTail = flushUtf8Decoder(runStdoutDecoder);
+        const stderrTail = flushUtf8Decoder(runStderrDecoder);
+        if (stdoutTail) {
+          channel.append(stdoutTail);
+        }
+        if (stderrTail) {
+          channel.append(stderrTail);
+        }
         runOnDeviceProcess = null;
         setRunOnDeviceActive(false);
         channel.appendLine("");

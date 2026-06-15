@@ -34,7 +34,7 @@
 
 ### 从 VSIX 安装（推荐）
 
-1. 下载 `xinghan-upload-0.12.0.vsix`（或从 Releases 获取）
+1. 下载 `xinghan-upload-0.13.0.vsix`（或从 Releases 获取）
 2. 在 Cursor/VSCode 中：`Cmd+Shift+P`（Mac）或 `Ctrl+Shift+P`（Win/Linux）→ 输入 **Extensions: Install from VSIX...** → 选择 `.vsix` 文件
 3. 重新加载窗口后即可使用
 
@@ -78,11 +78,14 @@ npm run esbuild    # 编译
 npm run package    # 生成 .vsix
 ```
 
-会在当前目录生成 `xinghan-upload-0.12.0.vsix`，可分发给他人安装。
+会在当前目录生成 `xinghan-upload-0.13.0.vsix`，可分发给他人安装。
 
 ## 更新日志
 
-### v0.12.0（当前发行版，对应 VSIX / 市场版本）
+### v0.13.0（当前发行版，对应 VSIX / 市场版本）
+- **修复**：有线「星瀚运行」输出区中文偶发乱码（UTF-8 字节流按块解码导致）；改用 `StringDecoder` 跨 chunk 正确解码
+
+### v0.12.0
 - **输出面板**：操作提示、警告与错误统一写入「星瀚助手」输出通道，减少弹窗干扰
 - **上传 / 运行**：若本地文件有未保存修改，会先提示保存再执行；取消保存则中止操作
 

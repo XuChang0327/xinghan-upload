@@ -3,5 +3,6 @@ out/
 dist/
 *.vsix
 .DS_Store
+.cursor/
 __pycache__/
 **/__pycache__/
