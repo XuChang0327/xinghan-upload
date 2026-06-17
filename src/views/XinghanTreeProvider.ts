@@ -22,7 +22,8 @@ export type DeviceFileTreeNode =
   | { kind: "placeholder"; label: string; description?: string };
 
 const ACTION_ITEMS: ActionItemNode[] = [
-  { id: "upload", label: "📤 星瀚上传", command: "xinghan.upload", tooltip: "上传当前文件到星瀚控制器" },
+  { id: "upload", label: "📤 仅上传", command: "xinghan.upload", tooltip: "上传到控制器（不运行）" },
+  { id: "uploadAndRun", label: "🚀 上传并运行", command: "xinghan.uploadAndRun", tooltip: "上传并在设备上运行" },
   { id: "wifi", label: "📶 WiFi连接", command: "xinghan.connectWifi", tooltip: "向设备发送 WiFi 连接命令" },
 ];
 
@@ -58,8 +59,8 @@ export class XinghanActionsTreeProvider implements vscode.TreeDataProvider<Actio
 
   getChildren(): ActionItemNode[] {
     const runItem: ActionItemNode = this._isRunOnDeviceActive
-      ? { id: "toggleRunOnDevice", label: "⏹️ 星瀚停止", command: "xinghan.toggleRunOnDevice", tooltip: "停止设备上正在运行的程序" }
-      : { id: "toggleRunOnDevice", label: "▶️ 星瀚运行", command: "xinghan.toggleRunOnDevice", tooltip: "在控制器上运行当前打开的文件" };
+      ? { id: "toggleRunOnDevice", label: "⏹️ 停止", command: "xinghan.toggleRunOnDevice", tooltip: "停止设备上正在运行的程序" }
+      : { id: "toggleRunOnDevice", label: "▶️ 运行", command: "xinghan.toggleRunOnDevice", tooltip: "运行当前文件" };
     const bluetoothItem: ActionItemNode = this._isBluetoothConnected
       ? { id: "toggleBluetooth", label: "⚪ 断开蓝牙", command: "xinghan.toggleBluetooth", tooltip: "断开当前蓝牙连接并恢复有线操作" }
       : { id: "toggleBluetooth", label: "🔵 蓝牙连接", command: "xinghan.toggleBluetooth", tooltip: "通过蓝牙连接星瀚控制器" };
@@ -69,9 +70,10 @@ export class XinghanActionsTreeProvider implements vscode.TreeDataProvider<Actio
     return [
       runItem,
       ACTION_ITEMS[0],
+      ACTION_ITEMS[1],
       replItem,
       bluetoothItem,
-      ACTION_ITEMS[1],
+      ACTION_ITEMS[2],
     ];
   }
 

@@ -2,7 +2,7 @@
   "name": "xinghan-upload",
   "displayName": "星瀚助手",
   "description": "在 Cursor/VSCode 中一键上传代码到星瀚控制器 (ESP32 MicroPython)，上传逻辑由 Python 脚本 wired_uploader.py 完成",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "publisher": "XuChang0327",
   "icon": "logo.png",
   "license": "MIT",
@@ -20,11 +20,11 @@
     "commands": [
       {
         "command": "xinghan.runOnDevice",
-        "title": "▶️ 星瀚运行"
+        "title": "▶️ 运行"
       },
       {
         "command": "xinghan.stopRunOnDevice",
-        "title": "⏹️ 星瀚停止"
+        "title": "⏹️ 停止"
       },
       {
         "command": "xinghan.toggleRunOnDevice",
@@ -32,7 +32,11 @@
       },
       {
         "command": "xinghan.upload",
-        "title": "📤 星瀚上传"
+        "title": "📤 仅上传"
+      },
+      {
+        "command": "xinghan.uploadAndRun",
+        "title": "🚀 上传并运行"
       },
       {
         "command": "xinghan.connectBluetooth",
@@ -147,6 +151,11 @@
           "command": "xinghan.upload",
           "when": "resourceScheme == file && explorerResourceIsFolder == false",
           "group": "0_xinghan.ctx@3"
+        },
+        {
+          "command": "xinghan.uploadAndRun",
+          "when": "resourceScheme == file && explorerResourceIsFolder == false",
+          "group": "0_xinghan.ctx@4"
         }
       ],
       "editor/context": [
@@ -164,6 +173,11 @@
           "command": "xinghan.upload",
           "when": "editorTextFocus && resourceScheme == file",
           "group": "0_xinghan.ctx@3"
+        },
+        {
+          "command": "xinghan.uploadAndRun",
+          "when": "editorTextFocus && resourceScheme == file",
+          "group": "0_xinghan.ctx@4"
         }
       ],
       "commandPalette": [
@@ -181,6 +195,10 @@
         },
         {
           "command": "xinghan.upload",
+          "when": "false"
+        },
+        {
+          "command": "xinghan.uploadAndRun",
           "when": "false"
         },
         {

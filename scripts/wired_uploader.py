@@ -147,14 +147,81 @@ def clear_container(port, container):
         return False
 
 
+def run_device_file(container, file_name, port=None):
+    """
+    在星瀚控制器上执行已写入设备存储的 .py 文件，输出实时显示。
+    :param container: 容器名，如 container1～container5
+    :param file_name: 设备上的文件名（不含路径）
+    :param port: 串口；None 则自动检测
+    :return: 0 成功，非 0 失败
+    """
+    if container not in CONTAINERS:
+        print(f"❌ 错误：容器名必须是 {CONTAINERS} 之一，当前为 '{container}'", file=sys.stderr)
+        return 5
+
+    if not port:
+        port = get_default_port()
+    if not port:
+        print("❌ 错误：未检测到星瀚控制器！请检查 USB 线是否插好，或使用 --port 指定端口。", file=sys.stderr)
+        return 2
+
+    device_path = f"{container}/{file_name}"
+    exec_code = f"exec(open({json.dumps(device_path)}).read())"
+    print(f"🔌 端口：{port}")
+    print(f"▶ 正在设备上运行 '{device_path}'（输出见下方）...", flush=True)
+    print("-" * 40, flush=True)
+
+    cmd = ["mpremote", "connect", port, "exec", exec_code]
+
+    try:
+        result = subprocess.run(cmd)
+        return result.returncode if result.returncode is not None else 0
+    except FileNotFoundError:
+        print("❌ 错误：未找到 mpremote 命令，请安装：pip install mpremote", file=sys.stderr)
+        return 4
+
+
 def upload_file(local_file_path, port=None, container="container1"):
     """
-    将本地文件烧录到硬件的指定容器文件夹中（会先清空容器中的旧文件）。
+    将本地文件烧录到硬件的指定容器文件夹中（会先清空容器中的旧文件），不运行。
     :param local_file_path: 本地 .py 文件路径
     :param port: 串口，如 /dev/cu.usbmodemxxx 或 COM3；None 则自动检测
     :param container: 目标容器名，如 container1～container5
     :return: 0 成功，非 0 失败（便于插件根据 exit code 判断）
     """
+    rc = _copy_to_container(local_file_path, port=port, container=container)
+    if rc != 0:
+        return rc
+    return soft_reset(port=port)
+
+
+def upload_and_run_file(local_file_path, port=None, container="container1"):
+    """
+    将本地文件烧录到硬件的指定容器文件夹中（会先清空容器中的旧文件），并在设备上运行。
+    """
+    if container not in CONTAINERS:
+        print(f"❌ 错误：容器名必须是 {CONTAINERS} 之一，当前为 '{container}'", file=sys.stderr)
+        return 5
+
+    if not os.path.exists(local_file_path):
+        print(f"❌ 错误：找不到文件 '{local_file_path}'", file=sys.stderr)
+        return 1
+
+    if not port:
+        port = get_default_port()
+    if not port:
+        print("❌ 错误：未检测到星瀚控制器！请检查 USB 线是否插好，或使用 --port 指定端口。", file=sys.stderr)
+        return 2
+
+    file_name = os.path.basename(local_file_path)
+    rc = _copy_to_container(local_file_path, port=port, container=container)
+    if rc != 0:
+        return rc
+    return run_device_file(container, file_name, port=port)
+
+
+def _copy_to_container(local_file_path, port=None, container="container1"):
+    """将本地文件写入指定容器（会先清空容器），不运行。"""
     if container not in CONTAINERS:
         print(f"❌ 错误：容器名必须是 {CONTAINERS} 之一，当前为 '{container}'", file=sys.stderr)
         return 5
@@ -183,7 +250,6 @@ def upload_file(local_file_path, port=None, container="container1"):
     cmd = [
         "mpremote", "connect", port,
         "fs", "cp", local_file_path, remote_path,
-        "+", "exec", "import machine; machine.soft_reset()",
     ]
 
     try:
@@ -191,7 +257,6 @@ def upload_file(local_file_path, port=None, container="container1"):
         print(f"✅ 烧录成功！已上传 {remote_path}。")
         if result.stdout:
             print(result.stdout.strip())
-        return 0
     except subprocess.CalledProcessError as e:
         print("❌ 烧录失败！", file=sys.stderr)
         if "ENOENT" in (e.stderr or "") or "No such file or directory" in (e.stderr or ""):
@@ -203,6 +268,8 @@ def upload_file(local_file_path, port=None, container="container1"):
     except FileNotFoundError:
         print("❌ 错误：未找到 mpremote 命令，请安装：pip install mpremote", file=sys.stderr)
         return 4
+
+    return 0
 
 
 def run_on_device(local_file_path, port=None):
@@ -569,6 +636,7 @@ def main():
     parser.add_argument("--delete", "-d", metavar="FILENAME", help="删除指定容器中的文件")
     parser.add_argument("--rename", nargs=2, metavar=("OLD", "NEW"), help="在同一容器内重命名 .py 文件：旧名 新名")
     parser.add_argument("--run", "-r", action="store_true", help="在设备上直接运行文件（不写入设备存储）")
+    parser.add_argument("--upload-and-run", action="store_true", help="上传到容器后在设备上运行")
     parser.add_argument("--soft-reset", action="store_true", help="向设备发送软复位（停止设备上正在运行的程序）")
     parser.add_argument("--wifi", nargs=2, metavar=("SSID", "PASSWORD"), help="连接 WiFi：--wifi <名称> <密码>")
     parser.add_argument("--wifi-auth", type=int, default=3, help="WiFi 认证模式（默认 3）")
@@ -619,6 +687,8 @@ def main():
 
     if args.run:
         return run_on_device(target_file, port=args.port)
+    if args.upload_and_run:
+        return upload_and_run_file(target_file, port=args.port, container=args.container)
     return upload_file(target_file, port=args.port, container=args.container)
 
 

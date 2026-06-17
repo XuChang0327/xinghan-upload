@@ -262,6 +262,20 @@ async def upload(address: str, file_path: str, container: str, timeout: float) -
         return 3
 
 
+async def upload_and_run(address: str, file_path: str, container: str, timeout: float, log_seconds: float) -> int:
+    try:
+        remote_path = await upload_file(address, file_path, container, timeout)
+        print(f"OK 上传完成：{remote_path}，正在运行…")
+        async with NusSession(address, timeout) as session:
+            await session.interrupt()
+            await session.write_repl_line(f"exec(open({json.dumps(remote_path)}).read())")
+            await session.drain_logs(log_seconds)
+        return 0
+    except Exception as e:
+        print(f"ERROR: 蓝牙上传并运行失败：{e}", file=sys.stderr)
+        return 3
+
+
 async def list_files(address: str, container: str, timeout: float) -> int:
     try:
         async with NusSession(address, timeout) as session:
@@ -384,6 +398,8 @@ async def main_async(args) -> int:
         return await rename_file(args.address, args.container, old_name, new_name, args.timeout)
     if args.upload:
         return await upload(args.address, args.upload, args.container, args.timeout)
+    if args.upload_and_run:
+        return await upload_and_run(args.address, args.upload_and_run, args.container, args.timeout, args.log_seconds)
     if args.run_file:
         return await run_file(args.address, args.run_file, args.container, args.timeout, args.log_seconds)
     print("ERROR: 未指定蓝牙操作", file=sys.stderr)
@@ -403,7 +419,8 @@ def main() -> int:
     parser.add_argument("--write-file", metavar="FILENAME", help="从 stdin 读取内容并写入蓝牙设备")
     parser.add_argument("--delete", metavar="FILENAME", help="删除指定容器中的文件")
     parser.add_argument("--rename", nargs=2, metavar=("OLD", "NEW"), help="在同一容器内重命名文件")
-    parser.add_argument("--upload", metavar="FILE", help="通过蓝牙上传文件")
+    parser.add_argument("--upload", metavar="FILE", help="通过蓝牙上传文件（不运行）")
+    parser.add_argument("--upload-and-run", metavar="FILE", help="通过蓝牙上传文件并在设备上运行")
     parser.add_argument("--run-file", metavar="FILE", help="通过蓝牙上传临时文件后运行")
     parser.add_argument("--container", default="container1", help="目标容器，默认 container1")
     parser.add_argument("--timeout", type=float, default=8.0, help="BLE 操作超时时间")
