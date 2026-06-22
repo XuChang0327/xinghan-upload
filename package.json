@@ -2,7 +2,7 @@
   "name": "xinghan-upload",
   "displayName": "星瀚助手",
   "description": "在 Cursor/VSCode 中一键上传代码到星瀚控制器 (ESP32 MicroPython)，上传逻辑由 Python 脚本 wired_uploader.py 完成",
-  "version": "0.14.0",
+  "version": "0.14.1",
   "publisher": "XuChang0327",
   "icon": "logo.png",
   "license": "MIT",
@@ -20,11 +20,11 @@
     "commands": [
       {
         "command": "xinghan.runOnDevice",
-        "title": "▶️ 运行"
+        "title": "运行"
       },
       {
         "command": "xinghan.stopRunOnDevice",
-        "title": "⏹️ 停止"
+        "title": "停止"
       },
       {
         "command": "xinghan.toggleRunOnDevice",
@@ -32,15 +32,15 @@
       },
       {
         "command": "xinghan.upload",
-        "title": "📤 仅上传"
+        "title": "上传"
       },
       {
         "command": "xinghan.uploadAndRun",
-        "title": "🚀 上传并运行"
+        "title": "上传运行"
       },
       {
         "command": "xinghan.connectBluetooth",
-        "title": "🔵 星瀚: 蓝牙连接"
+        "title": "星瀚: 蓝牙连接"
       },
       {
         "command": "xinghan.toggleBluetooth",
@@ -48,7 +48,7 @@
       },
       {
         "command": "xinghan.disconnectBluetooth",
-        "title": "⚪ 星瀚: 断开蓝牙"
+        "title": "星瀚: 蓝牙断开"
       },
       {
         "command": "xinghan.deleteFileFromTree",
@@ -56,7 +56,7 @@
       },
       {
         "command": "xinghan.disconnectRepl",
-        "title": "📴 REPL断开"
+        "title": "星瀚: REPL断开"
       },
       {
         "command": "xinghan.toggleRepl",
@@ -90,15 +90,15 @@
       },
       {
         "command": "xinghan.connectWifi",
-        "title": "📶 星瀚: WiFi连接"
+        "title": "星瀚: WiFi连接"
       },
       {
         "command": "xinghan.selectPortAndRepl",
-        "title": "🔌 星瀚: REPL连接"
+        "title": "星瀚: REPL连接"
       },
       {
         "command": "xinghan.renameDeviceFileFromTree",
-        "title": "✏️ 重命名"
+        "title": "重命名"
       }
     ],
     "menus": {

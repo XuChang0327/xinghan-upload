@@ -6,12 +6,13 @@ export interface DeviceFileInfo {
   size: string;
 }
 
-/** 操作项节点（仅用于「星瀚助手」栏；仅用 label 内 emoji 区分，不设置 ThemeIcon） */
+/** 操作项节点（仅用于「星瀚助手」栏） */
 interface ActionItemNode {
   id: string;
   label: string;
   command: string;
   tooltip?: string;
+  icon?: string;
 }
 
 /** 设备文件树节点：端口（仅多设备时）、容器、设备文件、占位（仅用于「星瀚控制器」栏） */
@@ -22,9 +23,9 @@ export type DeviceFileTreeNode =
   | { kind: "placeholder"; label: string; description?: string };
 
 const ACTION_ITEMS: ActionItemNode[] = [
-  { id: "upload", label: "📤 仅上传", command: "xinghan.upload", tooltip: "上传到控制器（不运行）" },
-  { id: "uploadAndRun", label: "🚀 上传并运行", command: "xinghan.uploadAndRun", tooltip: "上传并在设备上运行" },
-  { id: "wifi", label: "📶 WiFi连接", command: "xinghan.connectWifi", tooltip: "向设备发送 WiFi 连接命令" },
+  { id: "upload", label: "上传", command: "xinghan.upload", tooltip: "上传到控制器（不运行）", icon: "cloud-upload" },
+  { id: "uploadAndRun", label: "上传运行", command: "xinghan.uploadAndRun", tooltip: "上传并在设备上运行", icon: "rocket" },
+  { id: "wifi", label: "WiFi连接", command: "xinghan.connectWifi", tooltip: "向设备发送 WiFi 连接命令", icon: "globe" },
 ];
 
 /** 「星瀚助手」栏：仅展示操作项，无分类节点 */
@@ -54,19 +55,22 @@ export class XinghanActionsTreeProvider implements vscode.TreeDataProvider<Actio
     const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
     item.command = { command: element.command, title: element.label };
     item.tooltip = element.tooltip ?? element.label;
+    if (element.icon) {
+      item.iconPath = new vscode.ThemeIcon(element.icon);
+    }
     return item;
   }
 
   getChildren(): ActionItemNode[] {
     const runItem: ActionItemNode = this._isRunOnDeviceActive
-      ? { id: "toggleRunOnDevice", label: "⏹️ 停止", command: "xinghan.toggleRunOnDevice", tooltip: "停止设备上正在运行的程序" }
-      : { id: "toggleRunOnDevice", label: "▶️ 运行", command: "xinghan.toggleRunOnDevice", tooltip: "运行当前文件" };
+      ? { id: "toggleRunOnDevice", label: "停止", command: "xinghan.toggleRunOnDevice", tooltip: "停止设备上正在运行的程序", icon: "debug-stop" }
+      : { id: "toggleRunOnDevice", label: "运行", command: "xinghan.toggleRunOnDevice", tooltip: "运行当前文件", icon: "play" };
     const bluetoothItem: ActionItemNode = this._isBluetoothConnected
-      ? { id: "toggleBluetooth", label: "⚪ 断开蓝牙", command: "xinghan.toggleBluetooth", tooltip: "断开当前蓝牙连接并恢复有线操作" }
-      : { id: "toggleBluetooth", label: "🔵 蓝牙连接", command: "xinghan.toggleBluetooth", tooltip: "通过蓝牙连接星瀚控制器" };
+      ? { id: "toggleBluetooth", label: "蓝牙断开", command: "xinghan.toggleBluetooth", tooltip: "断开当前蓝牙连接并恢复有线操作", icon: "debug-disconnect" }
+      : { id: "toggleBluetooth", label: "蓝牙连接", command: "xinghan.toggleBluetooth", tooltip: "通过蓝牙连接星瀚控制器", icon: "bluetooth" };
     const replItem: ActionItemNode = this._isReplConnected
-      ? { id: "toggleRepl", label: "📴 REPL断开", command: "xinghan.toggleRepl", tooltip: "关闭 REPL 终端并释放串口" }
-      : { id: "toggleRepl", label: "🔌 REPL连接", command: "xinghan.toggleRepl", tooltip: "选择星瀚控制器端口并进入 REPL" };
+      ? { id: "toggleRepl", label: "REPL断开", command: "xinghan.toggleRepl", tooltip: "关闭 REPL 终端并释放串口", icon: "debug-disconnect" }
+      : { id: "toggleRepl", label: "REPL连接", command: "xinghan.toggleRepl", tooltip: "选择星瀚控制器端口并进入 REPL", icon: "terminal" };
     return [
       runItem,
       ACTION_ITEMS[0],
