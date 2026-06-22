@@ -67,7 +67,7 @@ export class XinghanActionsTreeProvider implements vscode.TreeDataProvider<Actio
       : { id: "toggleRunOnDevice", label: "运行", command: "xinghan.toggleRunOnDevice", tooltip: "运行当前文件", icon: "play" };
     const bluetoothItem: ActionItemNode = this._isBluetoothConnected
       ? { id: "toggleBluetooth", label: "蓝牙断开", command: "xinghan.toggleBluetooth", tooltip: "断开当前蓝牙连接并恢复有线操作", icon: "debug-disconnect" }
-      : { id: "toggleBluetooth", label: "蓝牙连接", command: "xinghan.toggleBluetooth", tooltip: "通过蓝牙连接星瀚控制器", icon: "bluetooth" };
+      : { id: "toggleBluetooth", label: "蓝牙连接", command: "xinghan.toggleBluetooth", tooltip: "通过蓝牙连接星瀚控制器", icon: "radio-tower" };
     const replItem: ActionItemNode = this._isReplConnected
       ? { id: "toggleRepl", label: "REPL断开", command: "xinghan.toggleRepl", tooltip: "关闭 REPL 终端并释放串口", icon: "debug-disconnect" }
       : { id: "toggleRepl", label: "REPL连接", command: "xinghan.toggleRepl", tooltip: "选择星瀚控制器端口并进入 REPL", icon: "terminal" };

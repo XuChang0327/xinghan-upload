@@ -34,7 +34,7 @@
 
 ### 从 VSIX 安装（推荐）
 
-1. 下载 `xinghan-upload-0.14.1.vsix`（或从 Releases 获取）
+1. 下载 `xinghan-upload-0.14.2.vsix`（或从 Releases 获取）
 2. 在 Cursor/VSCode 中：`Cmd+Shift+P`（Mac）或 `Ctrl+Shift+P`（Win/Linux）→ 输入 **Extensions: Install from VSIX...** → 选择 `.vsix` 文件
 3. 重新加载窗口后即可使用
 
@@ -78,11 +78,16 @@ npm run esbuild    # 编译
 npm run package    # 生成 .vsix
 ```
 
-会在当前目录生成 `xinghan-upload-0.14.1.vsix`，可分发给他人安装。
+会在当前目录生成 `xinghan-upload-0.14.2.vsix`，可分发给他人安装。
 
 ## 更新日志
 
-### v0.14.1（当前发行版，对应 VSIX / 市场版本）
+### v0.14.2（当前发行版，对应 VSIX / 市场版本）
+- **右键子菜单**：编辑器与资源管理器右键菜单收纳为「星瀚助手 ▸」子菜单，不再与其他功能混杂
+- **状态栏图标**：底部状态栏改用 Codicon 图标，顺序调整为 运行 → 上传 → 上传运行
+- **蓝牙图标修复**：蓝牙连接图标改用 `radio-tower`，修复之前不可见的问题
+
+### v0.14.1
 - **图标统一**：侧栏按钮改用 VSCode 原生 Codicon 图标，替代之前的 emoji，风格更统一专业
 - **文案精简**：「仅上传」→「上传」、「上传并运行」→「上传运行」、「断开蓝牙」→「蓝牙断开」，统一"对象+动作"格式
 - **移除 MCP 服务**：删除试验性 Codex MCP 服务相关代码与文档

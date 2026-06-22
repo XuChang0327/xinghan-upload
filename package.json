@@ -2,7 +2,7 @@
   "name": "xinghan-upload",
   "displayName": "星瀚助手",
   "description": "在 Cursor/VSCode 中一键上传代码到星瀚控制器 (ESP32 MicroPython)，上传逻辑由 Python 脚本 wired_uploader.py 完成",
-  "version": "0.14.1",
+  "version": "0.14.2",
   "publisher": "XuChang0327",
   "icon": "logo.png",
   "license": "MIT",
@@ -17,6 +17,12 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "submenus": [
+      {
+        "id": "xinghan.submenu",
+        "label": "星瀚助手"
+      }
+    ],
     "commands": [
       {
         "command": "xinghan.runOnDevice",
@@ -138,46 +144,34 @@
       ],
       "explorer/context": [
         {
-          "command": "xinghan.runOnDevice",
+          "submenu": "xinghan.submenu",
           "when": "resourceScheme == file && explorerResourceIsFolder == false",
-          "group": "0_xinghan.ctx@1"
-        },
-        {
-          "command": "xinghan.stopRunOnDevice",
-          "when": "resourceScheme == file && explorerResourceIsFolder == false",
-          "group": "0_xinghan.ctx@2"
-        },
-        {
-          "command": "xinghan.upload",
-          "when": "resourceScheme == file && explorerResourceIsFolder == false",
-          "group": "0_xinghan.ctx@3"
-        },
-        {
-          "command": "xinghan.uploadAndRun",
-          "when": "resourceScheme == file && explorerResourceIsFolder == false",
-          "group": "0_xinghan.ctx@4"
+          "group": "0_xinghan.ctx"
         }
       ],
       "editor/context": [
         {
-          "command": "xinghan.runOnDevice",
+          "submenu": "xinghan.submenu",
           "when": "editorTextFocus && resourceScheme == file",
-          "group": "0_xinghan.ctx@1"
+          "group": "0_xinghan.ctx"
+        }
+      ],
+      "xinghan.submenu": [
+        {
+          "command": "xinghan.runOnDevice",
+          "group": "1_run@1"
         },
         {
           "command": "xinghan.stopRunOnDevice",
-          "when": "editorTextFocus && resourceScheme == file",
-          "group": "0_xinghan.ctx@2"
+          "group": "1_run@2"
         },
         {
           "command": "xinghan.upload",
-          "when": "editorTextFocus && resourceScheme == file",
-          "group": "0_xinghan.ctx@3"
+          "group": "2_upload@1"
         },
         {
           "command": "xinghan.uploadAndRun",
-          "when": "editorTextFocus && resourceScheme == file",
-          "group": "0_xinghan.ctx@4"
+          "group": "2_upload@2"
         }
       ],
       "commandPalette": [

@@ -414,9 +414,9 @@ export function activate(context: vscode.ExtensionContext) {
   let bluetoothTarget: BluetoothTarget | null = null;
   let isBluetoothRunActive = false;
 
-  const runToggleStatusBarItem = createCommandStatusBarItem(context, "▶️ 运行", "xinghan.toggleRunOnDevice", "运行当前文件", 103);
-  createCommandStatusBarItem(context, "📤 仅上传", "xinghan.upload", "上传到控制器（不运行）", 101);
-  createCommandStatusBarItem(context, "🚀 上传并运行", "xinghan.uploadAndRun", "上传并在设备上运行", 102);
+  const runToggleStatusBarItem = createCommandStatusBarItem(context, "$(play) 运行", "xinghan.toggleRunOnDevice", "运行当前文件", 103);
+  createCommandStatusBarItem(context, "$(cloud-upload) 上传", "xinghan.upload", "上传到控制器（不运行）", 102);
+  createCommandStatusBarItem(context, "$(rocket) 上传运行", "xinghan.uploadAndRun", "上传并在设备上运行", 101);
 
   // 列出指定端口、容器中的文件（供侧边栏树使用）
   async function listDeviceFilesForTree(port: string, container: string): Promise<DeviceFileInfo[]> {
@@ -743,7 +743,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   function setRunOnDeviceActive(isActive: boolean): void {
     actionsTreeProvider.setRunOnDeviceActive(isActive);
-    runToggleStatusBarItem.text = isActive ? "⏹️ 停止" : "▶️ 运行";
+    runToggleStatusBarItem.text = isActive ? "$(debug-stop) 停止" : "$(play) 运行";
     runToggleStatusBarItem.tooltip = isActive ? "停止设备上正在运行的程序" : "运行当前文件";
   }
 
