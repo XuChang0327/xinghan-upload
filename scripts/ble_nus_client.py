@@ -373,12 +373,71 @@ async def run_file(address: str, file_path: str, container: str, timeout: float,
         return 3
 
 
+async def repl_mode(address: str, timeout: float) -> int:
+    BleakClient, _ = _load_bleak()
+    if BleakClient is None:
+        return 4
+
+    client = BleakClient(address)
+    loop = asyncio.get_running_loop()
+
+    def on_notify(_sender, data: bytearray):
+        try:
+            sys.stdout.buffer.write(data)
+            sys.stdout.buffer.flush()
+        except OSError:
+            pass
+
+    try:
+        print(f"正在连接蓝牙设备 {address}...", file=sys.stderr, flush=True)
+        await client.connect()
+        await client.start_notify(NUS_TX_UUID, on_notify)
+        print("蓝牙 REPL 已连接。Ctrl+] 退出。", file=sys.stderr, flush=True)
+
+        await client.write_gatt_char(NUS_RX_UUID, b"\x03\x03\r\n", response=True)
+        await asyncio.sleep(0.3)
+        await client.write_gatt_char(NUS_RX_UUID, b"\x02", response=True)
+        await asyncio.sleep(0.1)
+
+        reader = asyncio.StreamReader()
+        protocol = asyncio.StreamReaderProtocol(reader)
+        await loop.connect_read_pipe(lambda: protocol, sys.stdin)
+
+        while client.is_connected:
+            try:
+                data = await asyncio.wait_for(reader.read(128), timeout=0.5)
+            except asyncio.TimeoutError:
+                continue
+            if not data:
+                break
+            if b"\x1d" in data:
+                break
+            for i in range(0, len(data), DEFAULT_BLE_WRITE_SIZE):
+                chunk = data[i:i + DEFAULT_BLE_WRITE_SIZE]
+                await client.write_gatt_char(NUS_RX_UUID, chunk, response=True)
+
+        return 0
+    except Exception as e:
+        print(f"\nERROR: 蓝牙 REPL 连接失败：{e}", file=sys.stderr)
+        return 3
+    finally:
+        try:
+            await client.stop_notify(NUS_TX_UUID)
+        except Exception:
+            pass
+        if client.is_connected:
+            await client.disconnect()
+        print("\n蓝牙 REPL 已断开。", file=sys.stderr, flush=True)
+
+
 async def main_async(args) -> int:
     if args.scan:
         return await scan_devices(args.name_prefix, args.timeout)
     if not args.address:
         print("ERROR: 蓝牙操作需要 --address", file=sys.stderr)
         return 2
+    if args.repl:
+        return await repl_mode(args.address, args.timeout)
     if args.connect_check:
         return await connect_check(args.address, args.timeout)
     if args.hello:
@@ -411,6 +470,7 @@ def main() -> int:
     parser.add_argument("--scan", action="store_true", help="扫描蓝牙设备并输出 JSON")
     parser.add_argument("--name-prefix", default="", help="按蓝牙名称前缀筛选设备")
     parser.add_argument("--address", help="BLE 设备地址/identifier")
+    parser.add_argument("--repl", action="store_true", help="交互式 REPL 模式：保持 BLE 连接，stdin/stdout 双向透传")
     parser.add_argument("--connect-check", action="store_true", help="只检查 BLE/NUS 是否可连接，不发送协议命令")
     parser.add_argument("--hello", action="store_true", help="发送 HELLO")
     parser.add_argument("--stop", action="store_true", help="发送 STOP")

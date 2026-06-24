@@ -6,10 +6,29 @@ const vscode = require("vscode");
 const path = require("path");
 const fs = require("fs");
 const child_process_1 = require("child_process");
+const string_decoder_1 = require("string_decoder");
 const treeKill = require("tree-kill");
 const XinghanTreeProvider_1 = require("./views/XinghanTreeProvider");
 const XinghanDeviceFileSystemProvider_1 = require("./views/XinghanDeviceFileSystemProvider");
 const OUTPUT_CHANNEL_NAME = "星瀚助手";
+function outputInfo(channel, message) {
+    channel.show(true);
+    channel.appendLine(`[信息] ${message}`);
+}
+function outputWarn(channel, message) {
+    channel.show(true);
+    channel.appendLine(`[警告] ${message}`);
+}
+function outputError(channel, message) {
+    channel.show(true);
+    channel.appendLine(`[错误] ${message}`);
+}
+function decodeUtf8Chunk(decoder, data) {
+    return decoder.write(data);
+}
+function flushUtf8Decoder(decoder) {
+    return decoder.end();
+}
 const CONTAINERS = ["container1", "container2", "container3", "container4", "container5"];
 const REQUIRED_PACKAGES = ["pyserial", "mpremote"];
 const BLE_REQUIRED_PACKAGES = ["bleak"];
@@ -89,10 +108,10 @@ async function ensureDependencies(pythonPath, channel) {
     channel.appendLine("正在安装 Python 依赖...\n");
     const success = await installDependencies(pythonPath, missing, channel);
     if (success) {
-        vscode.window.showInformationMessage("星瀚: Python 依赖安装成功");
+        outputInfo(channel, "星瀚: Python 依赖安装成功");
     }
     else {
-        vscode.window.showErrorMessage(`星瀚: 依赖安装失败，请手动运行: ${pythonPath} -m pip install ${missing.join(" ")}`);
+        outputError(channel, `星瀚: 依赖安装失败，请手动运行: ${pythonPath} -m pip install ${missing.join(" ")}`);
     }
     return success;
 }
@@ -134,10 +153,10 @@ async function ensureBleDependencies(pythonPath, channel) {
     channel.appendLine("正在安装蓝牙 Python 依赖...\n");
     const success = await installDependencies(pythonPath, missing, channel);
     if (success) {
-        vscode.window.showInformationMessage("星瀚: 蓝牙依赖安装成功");
+        outputInfo(channel, "星瀚: 蓝牙依赖安装成功");
     }
     else {
-        vscode.window.showErrorMessage(`星瀚: 蓝牙依赖安装失败，请手动运行: ${pythonPath} -m pip install ${missing.join(" ")}`);
+        outputError(channel, `星瀚: 蓝牙依赖安装失败，请手动运行: ${pythonPath} -m pip install ${missing.join(" ")}`);
     }
     return success;
 }
@@ -156,23 +175,23 @@ function getConfig() {
  * 解析上传/运行要使用的本地文件路径：Explorer 右键会传入 Uri；编辑器无参则用当前活动编辑器。
  * 多选时仅作用于右键目标文件（首参 Uri）。
  */
-function resolveLocalFilePathForDevice(firstArg, selectedResources) {
+function resolveLocalFilePathForDevice(channel, firstArg, selectedResources) {
     const multi = Array.isArray(selectedResources) &&
         selectedResources.length > 1 &&
         selectedResources.every((u) => u instanceof vscode.Uri);
     if (firstArg instanceof vscode.Uri && firstArg.scheme === "file") {
         if (multi) {
-            vscode.window.showInformationMessage("星瀚: 已选择多个文件，仅对右键目标文件执行。");
+            outputInfo(channel, "星瀚: 已选择多个文件，仅对右键目标文件执行。");
         }
         try {
             const stat = fs.statSync(firstArg.fsPath);
             if (stat.isDirectory()) {
-                vscode.window.showWarningMessage("星瀚: 请选择文件，不能对文件夹执行。");
+                outputWarn(channel, "星瀚: 请选择文件，不能对文件夹执行。");
                 return null;
             }
         }
         catch {
-            vscode.window.showWarningMessage("星瀚: 无法访问该路径。");
+            outputWarn(channel, "星瀚: 无法访问该路径。");
             return null;
         }
         return firstArg.fsPath;
@@ -180,10 +199,22 @@ function resolveLocalFilePathForDevice(firstArg, selectedResources) {
     const editor = vscode.window.activeTextEditor;
     const docUri = editor?.document.uri;
     if (!docUri || docUri.scheme !== "file") {
-        vscode.window.showWarningMessage("请先打开要操作的本地文件。");
+        outputWarn(channel, "请先打开要操作的本地文件。");
         return null;
     }
     return docUri.fsPath;
+}
+/** 若本地文件在编辑器中有未保存修改，先保存再执行设备操作 */
+async function saveLocalFileIfDirty(channel, filePath, actionLabel) {
+    const doc = vscode.workspace.textDocuments.find((d) => d.uri.scheme === "file" && d.uri.fsPath === filePath);
+    if (!doc?.isDirty) {
+        return true;
+    }
+    const saved = await doc.save();
+    if (!saved) {
+        outputWarn(channel, `星瀚: 文件保存已取消，已中止${actionLabel}。`);
+    }
+    return saved;
 }
 /** 获取上传脚本的绝对路径：优先使用插件内嵌脚本 */
 function resolveScriptPath(extensionPath) {
@@ -204,17 +235,29 @@ function runPythonScript(pythonPath, scriptPath, args, channel, cwd) {
         });
         let stdout = "";
         let stderr = "";
+        const stdoutDecoder = new string_decoder_1.StringDecoder("utf8");
+        const stderrDecoder = new string_decoder_1.StringDecoder("utf8");
         proc.stdout?.on("data", (data) => {
-            const text = data.toString();
+            const text = decodeUtf8Chunk(stdoutDecoder, data);
             stdout += text;
             channel.append(text);
         });
         proc.stderr?.on("data", (data) => {
-            const text = data.toString();
+            const text = decodeUtf8Chunk(stderrDecoder, data);
             stderr += text;
             channel.append(text);
         });
         proc.on("close", (code, signal) => {
+            const stdoutTail = flushUtf8Decoder(stdoutDecoder);
+            const stderrTail = flushUtf8Decoder(stderrDecoder);
+            if (stdoutTail) {
+                stdout += stdoutTail;
+                channel.append(stdoutTail);
+            }
+            if (stderrTail) {
+                stderr += stderrTail;
+                channel.append(stderrTail);
+            }
             if (code !== undefined) {
                 channel.appendLine("");
                 channel.appendLine(`[退出码 ${code}]`);
@@ -254,21 +297,26 @@ function createCommandStatusBarItem(context, text, command, tooltip, priority) {
     item.tooltip = tooltip;
     item.show();
     context.subscriptions.push(item);
+    return item;
 }
 function activate(context) {
     const channel = vscode.window.createOutputChannel(OUTPUT_CHANNEL_NAME);
     /** 当前「在设备上运行」的进程，用于停止或上传前释放串口 */
     let runOnDeviceProcess = null;
-    /** 当前 REPL 终端与端口，用于「连接状态」展示与「断开 REPL」 */
+    /** 有线运行/上传并运行时使用的串口，供停止时发送 soft_reset */
+    let activeWiredRunPort = null;
+    /** 当前 REPL 终端与端口，用于「连接状态」展示与「REPL断开」 */
     let replTerminal = null;
     let replPort = null;
     /** 当前已选择的蓝牙目标；存在时运行/停止/上传优先走 BLE NUS 通道 */
     let bluetoothTarget = null;
-    createCommandStatusBarItem(context, "▶️ 星瀚运行", "xinghan.runOnDevice", "在星瀚控制器上运行当前文件", 103);
-    createCommandStatusBarItem(context, "⏹️ 星瀚停止", "xinghan.stopRunOnDevice", "停止星瀚控制器上正在运行的程序", 102);
-    createCommandStatusBarItem(context, "📤 星瀚上传", "xinghan.upload", "上传当前文件到星瀚控制器", 101);
+    let isBluetoothRunActive = false;
+    const runToggleStatusBarItem = createCommandStatusBarItem(context, "▶️ 运行", "xinghan.toggleRunOnDevice", "运行当前文件", 103);
+    createCommandStatusBarItem(context, "📤 仅上传", "xinghan.upload", "上传到控制器（不运行）", 101);
+    createCommandStatusBarItem(context, "🚀 上传并运行", "xinghan.uploadAndRun", "上传并在设备上运行", 102);
     // 列出指定端口、容器中的文件（供侧边栏树使用）
     async function listDeviceFilesForTree(port, container) {
+        await releaseInternalSerialPort({ targetPort: port });
         const config = getConfig();
         const scriptPath = resolveScriptPath(context.extensionPath);
         const args = ["--list-files", "--container", container, "--port", port];
@@ -283,6 +331,7 @@ function activate(context) {
     }
     // 从设备读取文件内容（供虚拟文件系统用，不写入 output channel）
     const readDeviceFileContent = async (port, container, filename) => {
+        await releaseInternalSerialPort({ targetPort: port });
         return new Promise((resolve, reject) => {
             const config = getConfig();
             const scriptPath = resolveScriptPath(context.extensionPath);
@@ -305,6 +354,7 @@ function activate(context) {
     };
     // 将内容写入设备文件（供虚拟文件系统保存用）
     const writeDeviceFileContent = async (port, container, filename, content) => {
+        await releaseInternalSerialPort({ targetPort: port });
         return new Promise((resolve, reject) => {
             const config = getConfig();
             const scriptPath = resolveScriptPath(context.extensionPath);
@@ -403,6 +453,67 @@ function activate(context) {
         }
         return runPythonScript(config.pythonPath, scriptPath, args, channel);
     }
+    /** 启动可跟踪的蓝牙脚本进程，便于「星瀚停止」在运行期间中断并复位设备 */
+    async function spawnTrackedBleScript(args, callbacks) {
+        const config = getConfig();
+        const scriptPath = resolveBleScriptPath(context.extensionPath);
+        if (!(await ensureBleDependencies(config.pythonPath, channel))) {
+            return -1;
+        }
+        return new Promise((resolve) => {
+            const fullCmd = [config.pythonPath, scriptPath, ...args].join(" ");
+            channel.appendLine(`> ${fullCmd}`);
+            channel.appendLine("");
+            const proc = (0, child_process_1.spawn)(config.pythonPath, [scriptPath, ...args], {
+                cwd: path.dirname(scriptPath),
+                shell: false,
+            });
+            runOnDeviceProcess = proc;
+            isBluetoothRunActive = true;
+            setRunOnDeviceActive(true);
+            const stdoutDecoder = new string_decoder_1.StringDecoder("utf8");
+            const stderrDecoder = new string_decoder_1.StringDecoder("utf8");
+            proc.stdout?.on("data", (data) => {
+                channel.append(decodeUtf8Chunk(stdoutDecoder, data));
+            });
+            proc.stderr?.on("data", (data) => {
+                channel.append(decodeUtf8Chunk(stderrDecoder, data));
+            });
+            proc.on("close", (code, signal) => {
+                const stdoutTail = flushUtf8Decoder(stdoutDecoder);
+                const stderrTail = flushUtf8Decoder(stderrDecoder);
+                if (stdoutTail) {
+                    channel.append(stdoutTail);
+                }
+                if (stderrTail) {
+                    channel.append(stderrTail);
+                }
+                runOnDeviceProcess = null;
+                const exitCode = code ?? -1;
+                channel.appendLine("");
+                channel.appendLine(`[退出码 ${code ?? "—"}${signal ? `，信号 ${signal}` : ""}]`);
+                if (exitCode === 0) {
+                    isBluetoothRunActive = true;
+                    setRunOnDeviceActive(true);
+                    callbacks?.onSuccess?.(exitCode);
+                }
+                else {
+                    isBluetoothRunActive = false;
+                    setRunOnDeviceActive(false);
+                    callbacks?.onFailure?.(exitCode);
+                }
+                resolve(exitCode);
+            });
+            proc.on("error", (err) => {
+                runOnDeviceProcess = null;
+                isBluetoothRunActive = false;
+                setRunOnDeviceActive(false);
+                channel.appendLine(`❌ 启动失败: ${err.message}`);
+                callbacks?.onFailure?.(-1);
+                resolve(-1);
+            });
+        });
+    }
     function bluetoothArgs(target) {
         const config = getConfig();
         return ["--address", target.address, "--timeout", String(config.bluetoothCommandTimeout)];
@@ -423,6 +534,63 @@ function activate(context) {
         const chosen = await vscode.window.showQuickPick(ports.map((p) => ({ label: formatPortLabel(p), description: p.device, device: p.device })), { title: "选择星瀚控制器端口", placeHolder: "检测到多个设备，请选择要使用的端口", matchOnDescription: true });
         return chosen?.device ?? null;
     }
+    async function pickUploadContainer(pickerTitle) {
+        const container = await vscode.window.showQuickPick(CONTAINERS.map((c) => ({ label: c, container: c })), { title: pickerTitle, placeHolder: "container1 ~ container5" });
+        return container?.container ?? null;
+    }
+    function startWiredUploadAndRun(filePath, port, container) {
+        const config = getConfig();
+        const scriptPath = resolveScriptPath(context.extensionPath);
+        const args = [filePath, "--upload-and-run", "--container", container, "--port", port];
+        const fullCmd = [config.pythonPath, scriptPath, ...args].join(" ");
+        channel.appendLine(`> ${fullCmd}`);
+        channel.appendLine("");
+        activeWiredRunPort = port;
+        const proc = (0, child_process_1.spawn)(config.pythonPath, [scriptPath, ...args], {
+            cwd: path.dirname(scriptPath),
+            shell: false,
+        });
+        runOnDeviceProcess = proc;
+        isBluetoothRunActive = false;
+        setRunOnDeviceActive(true);
+        const stdoutDecoder = new string_decoder_1.StringDecoder("utf8");
+        const stderrDecoder = new string_decoder_1.StringDecoder("utf8");
+        proc.stdout?.on("data", (data) => {
+            channel.append(decodeUtf8Chunk(stdoutDecoder, data));
+        });
+        proc.stderr?.on("data", (data) => {
+            channel.append(decodeUtf8Chunk(stderrDecoder, data));
+        });
+        proc.on("close", (code, signal) => {
+            const stdoutTail = flushUtf8Decoder(stdoutDecoder);
+            const stderrTail = flushUtf8Decoder(stderrDecoder);
+            if (stdoutTail) {
+                channel.append(stdoutTail);
+            }
+            if (stderrTail) {
+                channel.append(stderrTail);
+            }
+            runOnDeviceProcess = null;
+            activeWiredRunPort = null;
+            setRunOnDeviceActive(false);
+            channel.appendLine("");
+            channel.appendLine(`[退出码 ${code ?? "—"}${signal ? `，信号 ${signal}` : ""}]`);
+            if (code === 0) {
+                outputInfo(channel, `星瀚: 已上传并运行到 ${container}`);
+                deviceFilesTreeProvider.refresh();
+            }
+            else if (code !== null && code !== undefined && code !== 0) {
+                outputError(channel, "星瀚: 上传并运行失败或已中断，请查看输出。");
+            }
+        });
+        proc.on("error", (err) => {
+            runOnDeviceProcess = null;
+            activeWiredRunPort = null;
+            setRunOnDeviceActive(false);
+            channel.appendLine(`❌ 启动失败: ${err.message}`);
+            outputError(channel, `星瀚: 启动失败 — ${err.message}`);
+        });
+    }
     // 左侧边栏：三栏独立视图（星瀚助手 / 连接状态 / 星瀚控制器）
     const actionsTreeProvider = new XinghanTreeProvider_1.XinghanActionsTreeProvider();
     const connectionStatusTreeProvider = new XinghanTreeProvider_1.ConnectionStatusTreeProvider(listXinghanPorts);
@@ -434,6 +602,47 @@ function activate(context) {
     context.subscriptions.push(vscode.window.registerTreeDataProvider("xinghan.actionsView", actionsTreeProvider));
     context.subscriptions.push(vscode.window.registerTreeDataProvider("xinghan.connectionStatusView", connectionStatusTreeProvider));
     context.subscriptions.push(vscode.window.registerTreeDataProvider("xinghan.deviceFilesView", deviceFilesTreeProvider));
+    function setRunOnDeviceActive(isActive) {
+        actionsTreeProvider.setRunOnDeviceActive(isActive);
+        runToggleStatusBarItem.text = isActive ? "⏹️ 停止" : "▶️ 运行";
+        runToggleStatusBarItem.tooltip = isActive ? "停止设备上正在运行的程序" : "运行当前文件";
+    }
+    /**
+     * 有线操作前释放插件自身占用的串口：停止「在设备上运行」、按需断开 REPL。
+     * targetPort 未指定时视为占用默认端口，会断开当前 REPL。
+     */
+    async function releaseInternalSerialPort(options) {
+        const { targetPort, disconnectRepl = "matching", stopRun = true, log = false, reason = "释放串口", } = options;
+        let released = false;
+        const shouldDisconnectRepl = replTerminal &&
+            disconnectRepl !== "never" &&
+            (disconnectRepl === "always" || targetPort == null || replPort === targetPort);
+        if (shouldDisconnectRepl && replTerminal) {
+            if (log) {
+                channel.show(true);
+                channel.appendLine(`正在断开 REPL 以${reason}…`);
+            }
+            replTerminal.dispose();
+            replTerminal = null;
+            replPort = null;
+            actionsTreeProvider.setReplConnected(false);
+            connectionStatusTreeProvider.setPort(null);
+            released = true;
+        }
+        if (stopRun && runOnDeviceProcess) {
+            if (log) {
+                channel.show(true);
+                channel.appendLine(`正在停止设备上的运行以${reason}…`);
+            }
+            await stopRunOnDeviceProcess(runOnDeviceProcess);
+            runOnDeviceProcess = null;
+            setRunOnDeviceActive(false);
+            released = true;
+        }
+        if (released) {
+            await new Promise((r) => setTimeout(r, 500));
+        }
+    }
     // 连接状态 / 星瀚控制器 的「刷新」按钮：任按其一都会同时刷新两栏
     context.subscriptions.push(vscode.commands.registerCommand("xinghan.refreshConnectionStatus", () => {
         connectionStatusTreeProvider.refresh();
@@ -443,14 +652,23 @@ function activate(context) {
         connectionStatusTreeProvider.refresh();
         deviceFilesTreeProvider.refresh();
     }));
-    // 连接状态栏：右键「复制串口」——复制完整设备路径到剪贴板
+    // 连接状态栏：右键复制设备编号或串口信息
+    context.subscriptions.push(vscode.commands.registerCommand("xinghan.copyConnectionDeviceId", async (node) => {
+        const deviceId = node?.deviceId;
+        if (!deviceId) {
+            outputWarn(channel, "当前连接状态没有可复制的设备编号。");
+            return;
+        }
+        await vscode.env.clipboard.writeText(deviceId);
+        outputInfo(channel, `已复制设备编号：${deviceId}`);
+    }));
     context.subscriptions.push(vscode.commands.registerCommand("xinghan.copyConnectionPort", async (node) => {
         const path = node?.portPath;
         if (!path) {
             return;
         }
         await vscode.env.clipboard.writeText(path);
-        vscode.window.showInformationMessage(`已复制串口：${path}`);
+        outputInfo(channel, `已复制串口：${path}`);
     }));
     context.subscriptions.push(vscode.commands.registerCommand("xinghan.connectBluetooth", async () => {
         const config = getConfig();
@@ -483,7 +701,7 @@ function activate(context) {
             devices = await scanWithPrefix("");
         }
         if (devices.length === 0) {
-            vscode.window.showWarningMessage("未找到可连接的蓝牙设备。");
+            outputWarn(channel, "未找到可连接的蓝牙设备。");
             return;
         }
         const chosen = await vscode.window.showQuickPick(devices.map((d) => ({
@@ -498,26 +716,28 @@ function activate(context) {
         channel.appendLine(`\n正在连接蓝牙设备：${chosen.label} (${chosen.description})`);
         const { exitCode } = await runBleScript([...bluetoothArgs(chosen.device), "--connect-check"]);
         if (exitCode !== 0) {
-            vscode.window.showErrorMessage("星瀚: 蓝牙连接失败，请确认设备已开启 Nordic UART Service。");
+            outputError(channel, "星瀚: 蓝牙连接失败，请确认设备已开启 Nordic UART Service。");
             return;
         }
         bluetoothTarget = { name: chosen.device.name, address: chosen.device.address };
         actionsTreeProvider.setBluetoothConnected(true);
         connectionStatusTreeProvider.setBluetoothDevice(bluetoothTarget);
         deviceFilesTreeProvider.setBluetoothDevice(bluetoothTarget);
-        vscode.window.showInformationMessage(`星瀚: 已连接蓝牙设备 ${bluetoothTarget.name}`);
+        outputInfo(channel, `星瀚: 已连接蓝牙设备 ${bluetoothTarget.name}`);
     }));
     context.subscriptions.push(vscode.commands.registerCommand("xinghan.disconnectBluetooth", () => {
         if (!bluetoothTarget) {
-            vscode.window.showInformationMessage("星瀚: 当前没有蓝牙连接。");
+            outputInfo(channel, "星瀚: 当前没有蓝牙连接。");
             return;
         }
         const name = bluetoothTarget.name;
         bluetoothTarget = null;
+        isBluetoothRunActive = false;
         actionsTreeProvider.setBluetoothConnected(false);
+        setRunOnDeviceActive(runOnDeviceProcess !== null);
         connectionStatusTreeProvider.setBluetoothDevice(null);
         deviceFilesTreeProvider.setBluetoothDevice(null);
-        vscode.window.showInformationMessage(`星瀚: 已断开蓝牙设备 ${name}，恢复有线操作。`);
+        outputInfo(channel, `星瀚: 已断开蓝牙设备 ${name}，恢复有线操作。`);
     }));
     context.subscriptions.push(vscode.commands.registerCommand("xinghan.toggleBluetooth", async () => {
         if (bluetoothTarget) {
@@ -532,6 +752,7 @@ function activate(context) {
         if (replTerminal && closed === replTerminal) {
             replTerminal = null;
             replPort = null;
+            actionsTreeProvider.setReplConnected(false);
             connectionStatusTreeProvider.setPort(null);
         }
     }));
@@ -547,79 +768,127 @@ function activate(context) {
             deviceFilesTreeProvider.refresh();
         }
     }));
-    // 上传当前文件到星瀚（上传前会先停止正在运行的「在设备上运行」以释放串口）
+    // 仅上传当前文件到星瀚（不运行）
     context.subscriptions.push(vscode.commands.registerCommand("xinghan.upload", async (firstArg, selectedResources) => {
-        const filePath = resolveLocalFilePathForDevice(firstArg, selectedResources);
+        const filePath = resolveLocalFilePathForDevice(channel, firstArg, selectedResources);
         if (!filePath) {
+            return;
+        }
+        if (!(await saveLocalFileIfDirty(channel, filePath, "上传"))) {
             return;
         }
         const config = getConfig();
         const scriptPath = resolveScriptPath(context.extensionPath);
         const bleTarget = getBluetoothTargetOrWarn();
         if (bleTarget) {
-            const container = await vscode.window.showQuickPick(CONTAINERS.map((c) => ({ label: c, container: c })), { title: "选择要通过蓝牙上传到的容器", placeHolder: "container1 ~ container5" });
+            const container = await pickUploadContainer("选择要通过蓝牙上传到的容器");
             if (!container) {
                 return;
             }
             channel.show(true);
             channel.clear();
             channel.appendLine(`正在通过蓝牙上传到 ${bleTarget.name}...`);
-            if (runOnDeviceProcess) {
-                channel.appendLine("正在停止当前有线运行进程...");
-                await stopRunOnDeviceProcess(runOnDeviceProcess);
-                runOnDeviceProcess = null;
-            }
             const { exitCode } = await runBleScript([
                 ...bluetoothArgs(bleTarget),
                 "--upload",
                 filePath,
                 "--container",
-                container.container,
+                container,
             ]);
             if (exitCode === 0) {
-                vscode.window.showInformationMessage(`星瀚: 已通过蓝牙上传到 ${container.container}`);
+                outputInfo(channel, `星瀚: 已通过蓝牙上传到 ${container}`);
             }
             else {
-                vscode.window.showErrorMessage("星瀚: 蓝牙上传失败，请查看输出。");
+                outputError(channel, "星瀚: 蓝牙上传失败，请查看输出。");
             }
             return;
         }
-        // 检查依赖
         if (!(await ensureDependencies(config.pythonPath, channel))) {
             return;
         }
         const port = await resolvePortForUploadOrRun();
         if (port === null) {
-            vscode.window.showWarningMessage("未找到星瀚控制器或已取消选择端口。请连接设备后重试。");
+            outputWarn(channel, "未找到星瀚控制器或已取消选择端口。请连接设备后重试。");
             return;
         }
-        const container = await vscode.window.showQuickPick(CONTAINERS.map((c) => ({ label: c, container: c })), { title: "选择要上传到的容器", placeHolder: "container1 ~ container5" });
+        const container = await pickUploadContainer("选择要上传到的容器");
         if (!container) {
             return;
         }
         channel.show(true);
         channel.clear();
-        // 若有正在「在设备上运行」的进程，先停止以释放串口，再上传
-        if (runOnDeviceProcess) {
-            channel.appendLine("正在停止设备上的运行以释放串口…");
-            await stopRunOnDeviceProcess(runOnDeviceProcess);
-            runOnDeviceProcess = null;
-            await new Promise((r) => setTimeout(r, 500));
-        }
-        const args = [filePath, "--container", container.container, "--port", port];
+        await releaseInternalSerialPort({ targetPort: port, log: true, reason: "上传" });
+        const args = [filePath, "--container", container, "--port", port];
         const { exitCode } = await runPythonScript(config.pythonPath, scriptPath, args, channel);
         if (exitCode === 0) {
-            vscode.window.showInformationMessage(`星瀚: 已上传到 ${container.container}`);
+            outputInfo(channel, `星瀚: 已上传到 ${container}`);
             deviceFilesTreeProvider.refresh();
         }
         else {
-            vscode.window.showErrorMessage("星瀚: 上传失败，请查看输出。");
+            outputError(channel, "星瀚: 上传失败，请查看输出。");
         }
+    }));
+    // 上传当前文件到星瀚并在设备上运行
+    context.subscriptions.push(vscode.commands.registerCommand("xinghan.uploadAndRun", async (firstArg, selectedResources) => {
+        const filePath = resolveLocalFilePathForDevice(channel, firstArg, selectedResources);
+        if (!filePath) {
+            return;
+        }
+        if (!(await saveLocalFileIfDirty(channel, filePath, "上传并运行"))) {
+            return;
+        }
+        const bleTarget = getBluetoothTargetOrWarn();
+        if (bleTarget) {
+            const container = await pickUploadContainer("选择要通过蓝牙上传并运行到的容器");
+            if (!container) {
+                return;
+            }
+            channel.show(true);
+            channel.clear();
+            channel.appendLine(`正在通过蓝牙上传并运行到 ${bleTarget.name}...`);
+            if (runOnDeviceProcess) {
+                channel.appendLine("正在停止当前有线运行进程...");
+                await stopRunOnDeviceProcess(runOnDeviceProcess);
+                runOnDeviceProcess = null;
+                setRunOnDeviceActive(false);
+            }
+            await spawnTrackedBleScript([
+                ...bluetoothArgs(bleTarget),
+                "--upload-and-run",
+                filePath,
+                "--container",
+                container,
+            ], {
+                onSuccess: () => outputInfo(channel, `星瀚: 已通过蓝牙上传并运行到 ${container}`),
+                onFailure: () => outputError(channel, "星瀚: 蓝牙上传并运行失败，请查看输出。"),
+            });
+            return;
+        }
+        const config = getConfig();
+        if (!(await ensureDependencies(config.pythonPath, channel))) {
+            return;
+        }
+        const port = await resolvePortForUploadOrRun();
+        if (port === null) {
+            outputWarn(channel, "未找到星瀚控制器或已取消选择端口。请连接设备后重试。");
+            return;
+        }
+        const container = await pickUploadContainer("选择要上传并运行到的容器");
+        if (!container) {
+            return;
+        }
+        channel.show(true);
+        channel.clear();
+        await releaseInternalSerialPort({ targetPort: port, log: true, reason: "上传并运行" });
+        startWiredUploadAndRun(filePath, port, container);
     }));
     // 在控制器上直接运行当前文件（不写入设备，实时输出）；再次执行会先停止当前运行再运行新脚本
     context.subscriptions.push(vscode.commands.registerCommand("xinghan.runOnDevice", async (firstArg, selectedResources) => {
-        const filePath = resolveLocalFilePathForDevice(firstArg, selectedResources);
+        const filePath = resolveLocalFilePathForDevice(channel, firstArg, selectedResources);
         if (!filePath) {
+            return;
+        }
+        if (!(await saveLocalFileIfDirty(channel, filePath, "运行"))) {
             return;
         }
         const config = getConfig();
@@ -630,24 +899,22 @@ function activate(context) {
                 channel.appendLine("[蓝牙运行] 正在停止当前有线运行进程...");
                 await stopRunOnDeviceProcess(runOnDeviceProcess);
                 runOnDeviceProcess = null;
+                setRunOnDeviceActive(false);
                 await new Promise((r) => setTimeout(r, 500));
             }
             channel.show(true);
             channel.clear();
             channel.appendLine(`正在通过蓝牙运行 ${path.basename(filePath)}...`);
-            const { exitCode } = await runBleScript([
+            await spawnTrackedBleScript([
                 ...bluetoothArgs(bleTarget),
                 "--run-file",
                 filePath,
                 "--container",
                 config.bluetoothRunContainer,
-            ]);
-            if (exitCode === 0) {
-                vscode.window.showInformationMessage("星瀚: 蓝牙运行命令已发送");
-            }
-            else {
-                vscode.window.showErrorMessage("星瀚: 蓝牙运行失败，请查看输出。");
-            }
+            ], {
+                onSuccess: () => outputInfo(channel, "星瀚: 蓝牙运行命令已发送"),
+                onFailure: () => outputError(channel, "星瀚: 蓝牙运行失败，请查看输出。"),
+            });
             return;
         }
         // 检查依赖
@@ -656,16 +923,10 @@ function activate(context) {
         }
         const port = await resolvePortForUploadOrRun();
         if (port === null) {
-            vscode.window.showWarningMessage("未找到星瀚控制器或已取消选择端口。请连接设备后重试。");
+            outputWarn(channel, "未找到星瀚控制器或已取消选择端口。请连接设备后重试。");
             return;
         }
-        if (runOnDeviceProcess) {
-            channel.show(true);
-            channel.appendLine("[重新运行] 正在停止当前运行…");
-            await stopRunOnDeviceProcess(runOnDeviceProcess);
-            runOnDeviceProcess = null;
-            await new Promise((r) => setTimeout(r, 500));
-        }
+        await releaseInternalSerialPort({ targetPort: port, log: true, reason: "运行" });
         const scriptPath = resolveScriptPath(context.extensionPath);
         channel.show(true);
         channel.clear();
@@ -673,37 +934,64 @@ function activate(context) {
         const fullCmd = [config.pythonPath, scriptPath, ...args].join(" ");
         channel.appendLine(`> ${fullCmd}`);
         channel.appendLine("");
+        activeWiredRunPort = port;
         const proc = (0, child_process_1.spawn)(config.pythonPath, [scriptPath, ...args], {
             cwd: path.dirname(scriptPath),
             shell: false,
         });
         runOnDeviceProcess = proc;
-        proc.stdout?.on("data", (data) => channel.append(data.toString()));
-        proc.stderr?.on("data", (data) => channel.append(data.toString()));
+        isBluetoothRunActive = false;
+        setRunOnDeviceActive(true);
+        const runStdoutDecoder = new string_decoder_1.StringDecoder("utf8");
+        const runStderrDecoder = new string_decoder_1.StringDecoder("utf8");
+        proc.stdout?.on("data", (data) => {
+            const text = decodeUtf8Chunk(runStdoutDecoder, data);
+            channel.append(text);
+        });
+        proc.stderr?.on("data", (data) => {
+            const text = decodeUtf8Chunk(runStderrDecoder, data);
+            channel.append(text);
+        });
         proc.on("close", (code, signal) => {
+            const stdoutTail = flushUtf8Decoder(runStdoutDecoder);
+            const stderrTail = flushUtf8Decoder(runStderrDecoder);
+            if (stdoutTail) {
+                channel.append(stdoutTail);
+            }
+            if (stderrTail) {
+                channel.append(stderrTail);
+            }
             runOnDeviceProcess = null;
+            activeWiredRunPort = null;
+            setRunOnDeviceActive(false);
             channel.appendLine("");
             channel.appendLine(`[退出码 ${code ?? "—"}${signal ? `，信号 ${signal}` : ""}]`);
             if (code === 0) {
-                vscode.window.showInformationMessage("星瀚: 运行结束");
+                outputInfo(channel, "星瀚: 运行结束");
             }
             else if (code !== null && code !== undefined && code !== 0) {
-                vscode.window.showErrorMessage("星瀚: 运行失败或已中断，请查看输出。");
+                outputError(channel, "星瀚: 运行失败或已中断，请查看输出。");
             }
         });
         proc.on("error", (err) => {
             runOnDeviceProcess = null;
+            activeWiredRunPort = null;
+            setRunOnDeviceActive(false);
             channel.appendLine(`❌ 启动失败: ${err.message}`);
-            vscode.window.showErrorMessage(`星瀚: 启动失败 — ${err.message}`);
+            outputError(channel, `星瀚: 启动失败 — ${err.message}`);
         });
     }));
     // 停止当前在设备上运行的程序：先结束本机进程释放串口，再向设备发送软复位
     context.subscriptions.push(vscode.commands.registerCommand("xinghan.stopRunOnDevice", async () => {
         const bleTarget = getBluetoothTargetOrWarn();
         if (bleTarget) {
+            if (!runOnDeviceProcess && !isBluetoothRunActive) {
+                outputInfo(channel, "当前没有在设备上运行的程序。");
+                return;
+            }
             if (runOnDeviceProcess) {
                 channel.show(true);
-                channel.appendLine("\n[蓝牙停止] 正在终止当前有线运行进程...");
+                channel.appendLine("\n[蓝牙停止] 正在终止当前运行进程...");
                 await stopRunOnDeviceProcess(runOnDeviceProcess);
                 runOnDeviceProcess = null;
                 await new Promise((r) => setTimeout(r, 500));
@@ -712,33 +1000,47 @@ function activate(context) {
             channel.appendLine(`\n正在通过蓝牙停止 ${bleTarget.name}...`);
             const { exitCode } = await runBleScript([...bluetoothArgs(bleTarget), "--stop"]);
             if (exitCode === 0) {
-                vscode.window.showInformationMessage("星瀚: 已通过蓝牙发送停止命令");
+                isBluetoothRunActive = false;
+                setRunOnDeviceActive(false);
+                outputInfo(channel, "星瀚: 已通过蓝牙停止设备上的运行");
             }
             else {
-                vscode.window.showErrorMessage("星瀚: 蓝牙停止失败，请查看输出。");
+                outputError(channel, "星瀚: 蓝牙停止失败，请查看输出。");
             }
             return;
         }
         if (!runOnDeviceProcess) {
-            vscode.window.showInformationMessage("当前没有在设备上运行的程序。");
+            outputInfo(channel, "当前没有在设备上运行的程序。");
             return;
         }
         channel.appendLine("\n[用户请求停止] 正在终止本机进程并释放串口…");
+        const config = getConfig();
+        const resetPort = activeWiredRunPort ?? config.serialPort ?? undefined;
         await stopRunOnDeviceProcess(runOnDeviceProcess);
         runOnDeviceProcess = null;
+        activeWiredRunPort = null;
+        setRunOnDeviceActive(false);
         await new Promise((r) => setTimeout(r, 500));
-        const config = getConfig();
         const scriptPath = resolveScriptPath(context.extensionPath);
         const args = ["--soft-reset"];
-        if (config.serialPort)
-            args.push("--port", config.serialPort);
+        if (resetPort) {
+            args.push("--port", resetPort);
+        }
         channel.appendLine("正在向设备发送软复位…");
         const proc = (0, child_process_1.spawn)(config.pythonPath, [scriptPath, ...args], {
             cwd: path.dirname(scriptPath),
             shell: false,
         });
         await new Promise((resolve) => proc.on("close", () => resolve()));
-        vscode.window.showInformationMessage("星瀚: 已停止设备上的运行");
+        outputInfo(channel, "星瀚: 已停止设备上的运行");
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand("xinghan.toggleRunOnDevice", async (firstArg, selectedResources) => {
+        if (runOnDeviceProcess || isBluetoothRunActive) {
+            await vscode.commands.executeCommand("xinghan.stopRunOnDevice");
+        }
+        else {
+            await vscode.commands.executeCommand("xinghan.runOnDevice", firstArg, selectedResources);
+        }
     }));
     // 删除控制器上的文件
     context.subscriptions.push(vscode.commands.registerCommand("xinghan.deleteFile", async () => {
@@ -748,14 +1050,7 @@ function activate(context) {
         if (!(await ensureDependencies(config.pythonPath, channel))) {
             return;
         }
-        // 若有正在运行的进程，先停止以释放串口
-        if (runOnDeviceProcess) {
-            channel.show(true);
-            channel.appendLine("正在停止设备上的运行以释放串口…");
-            await stopRunOnDeviceProcess(runOnDeviceProcess);
-            runOnDeviceProcess = null;
-            await new Promise((r) => setTimeout(r, 500));
-        }
+        await releaseInternalSerialPort({ targetPort: config.serialPort, log: true, reason: "删除文件" });
         // 1. 选择容器
         const container = await vscode.window.showQuickPick(CONTAINERS.map((c) => ({ label: c, container: c })), { title: "选择要删除文件的容器", placeHolder: "container1 ~ container5" });
         if (!container) {
@@ -771,7 +1066,7 @@ function activate(context) {
         }
         const { exitCode: listExitCode, stdout: listStdout } = await runPythonScript(config.pythonPath, scriptPath, listArgs, channel);
         if (listExitCode !== 0) {
-            vscode.window.showErrorMessage("星瀚: 列出文件失败，请查看输出。");
+            outputError(channel, "星瀚: 列出文件失败，请查看输出。");
             return;
         }
         let files;
@@ -779,12 +1074,11 @@ function activate(context) {
             files = JSON.parse(listStdout.trim());
         }
         catch {
-            channel.appendLine("解析文件列表失败。");
-            vscode.window.showErrorMessage("星瀚: 解析文件列表失败。");
+            outputError(channel, "星瀚: 解析文件列表失败。");
             return;
         }
         if (files.length === 0) {
-            vscode.window.showInformationMessage(`${container.container} 中没有文件。`);
+            outputInfo(channel, `${container.container} 中没有文件。`);
             return;
         }
         // 3. 选择要删除的文件
@@ -805,11 +1099,11 @@ function activate(context) {
         }
         const { exitCode: deleteExitCode } = await runPythonScript(config.pythonPath, scriptPath, deleteArgs, channel);
         if (deleteExitCode === 0) {
-            vscode.window.showInformationMessage(`星瀚: 已删除 ${container.container}/${fileToDelete.filename}`);
+            outputInfo(channel, `星瀚: 已删除 ${container.container}/${fileToDelete.filename}`);
             deviceFilesTreeProvider.refresh();
         }
         else {
-            vscode.window.showErrorMessage("星瀚: 删除失败，请查看输出。");
+            outputError(channel, "星瀚: 删除失败，请查看输出。");
         }
     }));
     // 从侧边栏树中删除设备上的文件（右键菜单）
@@ -818,13 +1112,7 @@ function activate(context) {
             return;
         const config = getConfig();
         const scriptPath = resolveScriptPath(context.extensionPath);
-        if (runOnDeviceProcess) {
-            channel.show(true);
-            channel.appendLine("正在停止设备上的运行以释放串口…");
-            await stopRunOnDeviceProcess(runOnDeviceProcess);
-            runOnDeviceProcess = null;
-            await new Promise((r) => setTimeout(r, 500));
-        }
+        await releaseInternalSerialPort({ targetPort: element.port, log: true, reason: "删除文件" });
         const confirm = await vscode.window.showWarningMessage(`确定要删除 ${element.container}/${element.name} 吗？`, { modal: true }, "删除");
         if (confirm !== "删除")
             return;
@@ -835,11 +1123,11 @@ function activate(context) {
         const deleteArgs = ["--delete", element.name, "--container", element.container, "--port", element.port];
         const { exitCode } = await runPythonScript(config.pythonPath, scriptPath, deleteArgs, channel);
         if (exitCode === 0) {
-            vscode.window.showInformationMessage(`星瀚: 已删除 ${element.container}/${element.name}`);
+            outputInfo(channel, `星瀚: 已删除 ${element.container}/${element.name}`);
             deviceFilesTreeProvider.refresh();
         }
         else {
-            vscode.window.showErrorMessage("星瀚: 删除失败，请查看输出。");
+            outputError(channel, "星瀚: 删除失败，请查看输出。");
         }
     }));
     /** 设备树重命名：新文件名校验（与 wired_uploader 一致） */
@@ -874,20 +1162,14 @@ function activate(context) {
         const newName = newNameRaw.trim();
         const nameErr = validateDevicePyFilename(newName);
         if (nameErr) {
-            vscode.window.showErrorMessage(`星瀚: ${nameErr}`);
+            outputError(channel, `星瀚: ${nameErr}`);
             return;
         }
         if (newName === element.name) {
-            vscode.window.showInformationMessage("名称未变化。");
+            outputInfo(channel, "名称未变化。");
             return;
         }
-        if (runOnDeviceProcess) {
-            channel.show(true);
-            channel.appendLine("正在停止设备上的运行以释放串口…");
-            await stopRunOnDeviceProcess(runOnDeviceProcess);
-            runOnDeviceProcess = null;
-            await new Promise((r) => setTimeout(r, 500));
-        }
+        await releaseInternalSerialPort({ targetPort: element.port, log: true, reason: "重命名文件" });
         channel.show(true);
         channel.appendLine(`正在重命名 ${element.name} → ${newName}...`);
         if (!(await ensureDependencies(config.pythonPath, channel)))
@@ -895,7 +1177,7 @@ function activate(context) {
         const renameArgs = ["--rename", element.name, newName, "--container", element.container, "--port", element.port];
         const { exitCode } = await runPythonScript(config.pythonPath, scriptPath, renameArgs, channel);
         if (exitCode === 0) {
-            vscode.window.showInformationMessage(`星瀚: 已重命名为 ${element.container}/${newName}`);
+            outputInfo(channel, `星瀚: 已重命名为 ${element.container}/${newName}`);
             deviceFilesTreeProvider.refresh();
             const oldUri = (0, XinghanDeviceFileSystemProvider_1.toDeviceUri)(element.port, element.container, element.name);
             const newUri = (0, XinghanDeviceFileSystemProvider_1.toDeviceUri)(element.port, element.container, newName);
@@ -908,7 +1190,7 @@ function activate(context) {
             }
         }
         else {
-            vscode.window.showErrorMessage("星瀚: 重命名失败，请查看输出。");
+            outputError(channel, "星瀚: 重命名失败，请查看输出。");
         }
     }));
     // 连接 WiFi
@@ -919,14 +1201,7 @@ function activate(context) {
         if (!(await ensureDependencies(config.pythonPath, channel))) {
             return;
         }
-        // 若有正在运行的进程，先停止以释放串口
-        if (runOnDeviceProcess) {
-            channel.show(true);
-            channel.appendLine("正在停止设备上的运行以释放串口…");
-            await stopRunOnDeviceProcess(runOnDeviceProcess);
-            runOnDeviceProcess = null;
-            await new Promise((r) => setTimeout(r, 500));
-        }
+        await releaseInternalSerialPort({ targetPort: config.serialPort, log: true, reason: "连接 WiFi" });
         // 构建选项：预设 WiFi + 手动输入
         const presetItems = config.wifiPresets.map((w) => ({
             label: w.name,
@@ -961,7 +1236,7 @@ function activate(context) {
             }
             const spaceIndex = input.indexOf(" ");
             if (spaceIndex === -1) {
-                vscode.window.showErrorMessage("格式错误，请输入：WiFi名称 密码（用空格分隔）");
+                outputError(channel, "格式错误，请输入：WiFi名称 密码（用空格分隔）");
                 return;
             }
             ssid = input.substring(0, spaceIndex);
@@ -975,13 +1250,13 @@ function activate(context) {
         }
         const { exitCode } = await runPythonScript(config.pythonPath, scriptPath, args, channel);
         if (exitCode === 0) {
-            vscode.window.showInformationMessage(`星瀚: 已发送 WiFi 连接命令 (${ssid})`);
+            outputInfo(channel, `星瀚: 已发送 WiFi 连接命令 (${ssid})`);
         }
         else {
-            vscode.window.showErrorMessage("星瀚: WiFi 连接失败，请查看输出。");
+            outputError(channel, "星瀚: WiFi 连接失败，请查看输出。");
         }
     }));
-    // 连接 REPL：选择端口并进入 REPL（仅显示星瀚控制器端口：/dev/cu.usbmodem*）
+    // REPL连接：选择端口并进入 REPL（仅显示星瀚控制器端口：/dev/cu.usbmodem*）
     context.subscriptions.push(vscode.commands.registerCommand("xinghan.selectPortAndRepl", async () => {
         const config = getConfig();
         if (!(await ensureDependencies(config.pythonPath, channel))) {
@@ -989,12 +1264,17 @@ function activate(context) {
         }
         const ports = await listXinghanPorts();
         if (ports.length === 0) {
-            vscode.window.showWarningMessage("未找到星瀚控制器。请连接设备（/dev/cu.usbmodem*）后重试。");
+            outputWarn(channel, "未找到星瀚控制器。请连接设备（/dev/cu.usbmodem*）后重试。");
             return;
         }
-        const chosen = await vscode.window.showQuickPick(ports.map((p) => ({ label: formatPortLabel(p), description: p.device, device: p.device })), { title: "选择星瀚控制器端口并进入 REPL", matchOnDescription: true });
+        const chosen = await vscode.window.showQuickPick(ports.map((p) => ({ label: formatPortLabel(p), description: p.device, device: p.device, deviceId: p.device_id ?? formatPortLabel(p) })), { title: "选择星瀚控制器端口并进入 REPL", matchOnDescription: true });
         if (!chosen)
             return;
+        await releaseInternalSerialPort({
+            disconnectRepl: "always",
+            log: true,
+            reason: "进入 REPL",
+        });
         const term = vscode.window.createTerminal({
             name: "星瀚 REPL",
             shellPath: config.pythonPath,
@@ -1003,20 +1283,43 @@ function activate(context) {
         term.show();
         replTerminal = term;
         replPort = chosen.device;
-        connectionStatusTreeProvider.setPort(chosen.device, chosen.label);
+        actionsTreeProvider.setReplConnected(true);
+        connectionStatusTreeProvider.setPort(chosen.device, chosen.label, chosen.deviceId);
     }));
-    // 断开 REPL：关闭 REPL 终端并释放串口
+    // REPL断开：关闭 REPL 终端并释放串口
     context.subscriptions.push(vscode.commands.registerCommand("xinghan.disconnectRepl", () => {
         if (!replTerminal) {
-            vscode.window.showInformationMessage("星瀚: 当前没有通过插件打开的 REPL，无需断开。");
+            outputInfo(channel, "星瀚: 当前没有通过插件打开的 REPL，无需断开。");
             return;
         }
         replTerminal.dispose();
         replTerminal = null;
         replPort = null;
+        actionsTreeProvider.setReplConnected(false);
         connectionStatusTreeProvider.setPort(null);
-        vscode.window.showInformationMessage("星瀚: 已断开 REPL，串口已释放。");
+        outputInfo(channel, "星瀚: REPL已断开，串口已释放。");
     }));
+    context.subscriptions.push(vscode.commands.registerCommand("xinghan.toggleRepl", async () => {
+        if (replTerminal) {
+            await vscode.commands.executeCommand("xinghan.disconnectRepl");
+        }
+        else {
+            await vscode.commands.executeCommand("xinghan.selectPortAndRepl");
+        }
+    }));
+    context.subscriptions.push({
+        dispose: () => {
+            if (replTerminal) {
+                replTerminal.dispose();
+                replTerminal = null;
+                replPort = null;
+            }
+            if (runOnDeviceProcess) {
+                void stopRunOnDeviceProcess(runOnDeviceProcess);
+                runOnDeviceProcess = null;
+            }
+        },
+    });
 }
 function deactivate() { }
 //# sourceMappingURL=extension.js.map

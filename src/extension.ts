@@ -1550,43 +1550,68 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // REPL连接：选择端口并进入 REPL（仅显示星瀚控制器端口：/dev/cu.usbmodem*）
+  // REPL连接：根据当前模式选择有线或蓝牙 REPL
   context.subscriptions.push(
     vscode.commands.registerCommand("xinghan.selectPortAndRepl", async () => {
       const config = getConfig();
 
-      if (!(await ensureDependencies(config.pythonPath, channel))) {
-        return;
+      if (bluetoothTarget) {
+        // 蓝牙模式：通过 BLE NUS 进入交互式 REPL
+        if (!(await ensureBleDependencies(config.pythonPath, channel))) {
+          return;
+        }
+
+        await releaseInternalSerialPort({
+          disconnectRepl: "always",
+          log: true,
+          reason: "进入蓝牙 REPL",
+        });
+
+        const scriptPath = resolveBleScriptPath(context.extensionPath);
+        const term = vscode.window.createTerminal({
+          name: "星瀚 REPL (蓝牙)",
+          shellPath: config.pythonPath,
+          shellArgs: [scriptPath, "--address", bluetoothTarget.address, "--timeout", String(config.bluetoothCommandTimeout), "--repl"],
+        });
+        term.show();
+        replTerminal = term;
+        replPort = null;
+        actionsTreeProvider.setReplConnected(true);
+      } else {
+        // 有线模式：选择串口并通过 mpremote 进入 REPL
+        if (!(await ensureDependencies(config.pythonPath, channel))) {
+          return;
+        }
+
+        const ports = await listXinghanPorts();
+        if (ports.length === 0) {
+          outputWarn(channel, "未找到星瀚控制器。请连接设备（/dev/cu.usbmodem*）后重试。");
+          return;
+        }
+
+        const chosen = await vscode.window.showQuickPick(
+          ports.map((p) => ({ label: formatPortLabel(p), description: p.device, device: p.device, deviceId: p.device_id ?? formatPortLabel(p) })),
+          { title: "选择星瀚控制器端口并进入 REPL", matchOnDescription: true }
+        );
+        if (!chosen) return;
+
+        await releaseInternalSerialPort({
+          disconnectRepl: "always",
+          log: true,
+          reason: "进入 REPL",
+        });
+
+        const term = vscode.window.createTerminal({
+          name: "星瀚 REPL",
+          shellPath: config.pythonPath,
+          shellArgs: ["-m", "mpremote", "connect", chosen.device],
+        });
+        term.show();
+        replTerminal = term;
+        replPort = chosen.device;
+        actionsTreeProvider.setReplConnected(true);
+        connectionStatusTreeProvider.setPort(chosen.device, chosen.label, chosen.deviceId);
       }
-
-      const ports = await listXinghanPorts();
-      if (ports.length === 0) {
-        outputWarn(channel, "未找到星瀚控制器。请连接设备（/dev/cu.usbmodem*）后重试。");
-        return;
-      }
-
-      const chosen = await vscode.window.showQuickPick(
-        ports.map((p) => ({ label: formatPortLabel(p), description: p.device, device: p.device, deviceId: p.device_id ?? formatPortLabel(p) })),
-        { title: "选择星瀚控制器端口并进入 REPL", matchOnDescription: true }
-      );
-      if (!chosen) return;
-
-      await releaseInternalSerialPort({
-        disconnectRepl: "always",
-        log: true,
-        reason: "进入 REPL",
-      });
-
-      const term = vscode.window.createTerminal({
-        name: "星瀚 REPL",
-        shellPath: config.pythonPath,
-        shellArgs: ["-m", "mpremote", "connect", chosen.device],
-      });
-      term.show();
-      replTerminal = term;
-      replPort = chosen.device;
-      actionsTreeProvider.setReplConnected(true);
-      connectionStatusTreeProvider.setPort(chosen.device, chosen.label, chosen.deviceId);
     })
   );
 
