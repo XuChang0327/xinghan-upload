@@ -23,9 +23,9 @@ NUS_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
 NUS_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 
 DEFAULT_BLE_WRITE_SIZE = 20
-DEFAULT_FILE_CHUNK_SIZE = 72
+DEFAULT_FILE_CHUNK_SIZE = 128
 REPL_COMMAND_DELAY = 0.08
-UPLOAD_REPL_COMMAND_DELAY = 0.02
+UPLOAD_REPL_COMMAND_DELAY = 0.015
 CAPTURE_BEGIN = "__XINGHAN_BEGIN__"
 CAPTURE_END = "__XINGHAN_END__"
 
@@ -67,6 +67,36 @@ async def scan_devices(name_prefix: str, timeout: float) -> int:
     return 0
 
 
+async def scan_devices_stream(name_prefix: str, timeout: float) -> int:
+    """流式扫描：每发现一个新设备立即输出一行 JSON，扫描结束输出 __SCAN_DONE__"""
+    _, BleakScanner = _load_bleak()
+    if BleakScanner is None:
+        return 4
+    prefix = name_prefix.lower().strip()
+    seen_addresses = set()
+
+    def on_detection(device, advertisement_data):
+        if device.address in seen_addresses:
+            return
+        name = device.name or ""
+        if prefix and not name.lower().startswith(prefix):
+            return
+        seen_addresses.add(device.address)
+        entry = {
+            "name": name or "（未命名蓝牙设备）",
+            "address": device.address,
+            "rssi": advertisement_data.rssi,
+        }
+        print(json.dumps(entry, ensure_ascii=False), flush=True)
+
+    scanner = BleakScanner(detection_callback=on_detection)
+    await scanner.start()
+    await asyncio.sleep(timeout)
+    await scanner.stop()
+    print("__SCAN_DONE__", flush=True)
+    return 0
+
+
 class NusSession:
     def __init__(self, address: str, timeout: float):
         BleakClient, _ = _load_bleak()
@@ -76,9 +106,13 @@ class NusSession:
         self.timeout = timeout
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._buffer = bytearray()
+        self._write_size = DEFAULT_BLE_WRITE_SIZE
 
     async def __aenter__(self):
         await self.client.connect()
+        mtu = self.client.mtu_size
+        if mtu and mtu > 3:
+            self._write_size = min(mtu - 3, 512)
         await self.client.start_notify(NUS_TX_UUID, self._on_notify)
         return self
 
@@ -100,8 +134,8 @@ class NusSession:
 
     async def write_text(self, text: str):
         data = text.encode("utf-8")
-        for i in range(0, len(data), DEFAULT_BLE_WRITE_SIZE):
-            await self.client.write_gatt_char(NUS_RX_UUID, data[i:i + DEFAULT_BLE_WRITE_SIZE], response=True)
+        for i in range(0, len(data), self._write_size):
+            await self.client.write_gatt_char(NUS_RX_UUID, data[i:i + self._write_size], response=True)
 
     async def write_line(self, line: str):
         await self.write_text(line + "\n")
@@ -131,13 +165,14 @@ class NusSession:
             if item.startswith("ERR"):
                 raise RuntimeError(item)
 
-    async def drain_logs(self, seconds: float):
+    async def drain_logs(self, seconds: float, silent: bool = False):
         end_at = asyncio.get_running_loop().time() + seconds
         while asyncio.get_running_loop().time() < end_at:
             timeout = max(0.1, min(1.0, end_at - asyncio.get_running_loop().time()))
             try:
                 item = await asyncio.wait_for(self._queue.get(), timeout=timeout)
-                print(item, flush=True)
+                if not silent:
+                    print(item, flush=True)
             except asyncio.TimeoutError:
                 continue
 
@@ -203,6 +238,7 @@ async def stop(address: str, timeout: float) -> int:
 async def upload_file(address: str, file_path: str, container: str, timeout: float, remote_name: Optional[str] = None) -> str:
     if not os.path.exists(file_path):
         raise FileNotFoundError(file_path)
+    file_size = os.path.getsize(file_path)
     remote_path = _remote_path(container, remote_name or os.path.basename(file_path))
     async with NusSession(address, timeout) as session:
         await session.interrupt()
@@ -211,7 +247,6 @@ async def upload_file(address: str, file_path: str, container: str, timeout: flo
         await session.write_repl_line("uos.mkdir(_d) if _d not in uos.listdir() else None")
         await session.write_repl_line(f"_f = open({json.dumps(remote_path)}, 'wb')")
         total = 0
-        started_at = time.time()
         with open(file_path, "rb") as f:
             while True:
                 chunk = f.read(DEFAULT_FILE_CHUNK_SIZE)
@@ -223,12 +258,13 @@ async def upload_file(address: str, file_path: str, container: str, timeout: flo
                     delay=UPLOAD_REPL_COMMAND_DELAY,
                 )
                 total += len(chunk)
-                if time.time() - started_at > 1.0:
-                    print(f"已发送 {total} bytes", flush=True)
-                    started_at = time.time()
+                if file_size > 0:
+                    pct = min(99, int(total * 100 / file_size))
+                    print(f"##PROGRESS:{pct}##", flush=True)
         await session.write_repl_line("_f.close()")
         await session.write_repl_line(f"print({json.dumps('OK 上传完成：' + remote_path)})")
-        await session.drain_logs(1.0)
+        await session.drain_logs(1.0, silent=True)
+    print("##PROGRESS:100##", flush=True)
     return remote_path
 
 
@@ -248,7 +284,7 @@ async def write_content(address: str, container: str, filename: str, content: by
             )
         await session.write_repl_line("_f.close()")
         await session.write_repl_line(f"print({json.dumps('OK 写入完成：' + remote_path)})")
-        await session.drain_logs(1.0)
+        await session.drain_logs(1.0, silent=True)
     return remote_path
 
 
@@ -433,6 +469,8 @@ async def repl_mode(address: str, timeout: float) -> int:
 async def main_async(args) -> int:
     if args.scan:
         return await scan_devices(args.name_prefix, args.timeout)
+    if args.scan_stream:
+        return await scan_devices_stream(args.name_prefix, args.timeout)
     if not args.address:
         print("ERROR: 蓝牙操作需要 --address", file=sys.stderr)
         return 2
@@ -468,6 +506,7 @@ async def main_async(args) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="星瀚 BLE NUS 客户端")
     parser.add_argument("--scan", action="store_true", help="扫描蓝牙设备并输出 JSON")
+    parser.add_argument("--scan-stream", action="store_true", help="流式扫描：实时逐行输出发现的设备 JSON")
     parser.add_argument("--name-prefix", default="", help="按蓝牙名称前缀筛选设备")
     parser.add_argument("--address", help="BLE 设备地址/identifier")
     parser.add_argument("--repl", action="store_true", help="交互式 REPL 模式：保持 BLE 连接，stdin/stdout 双向透传")

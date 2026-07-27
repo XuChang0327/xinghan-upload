@@ -9,6 +9,7 @@ import sys
 import json
 import subprocess
 import tempfile
+import serial
 import serial.tools.list_ports
 
 
@@ -121,7 +122,7 @@ def clear_container(port, container):
         result = subprocess.run(list_cmd, capture_output=True, text=True)
         if result.returncode != 0:
             return True  # 容器可能为空或不存在，不算错误
-        
+
         # 解析文件列表并删除
         for line in result.stdout.strip().split("\n"):
             line = line.strip()
@@ -134,13 +135,12 @@ def clear_container(port, container):
                 filename = parts[0]
             else:
                 continue
-            
+
             # 删除文件
             remote_path = f":{container}/{filename}"
-            print(f"🗑 删除旧文件: {filename}")
             del_cmd = ["mpremote", "connect", port, "fs", "rm", remote_path]
             subprocess.run(del_cmd, capture_output=True, text=True)
-        
+
         return True
     except Exception as e:
         print(f"⚠️ 清空容器时出错: {e}", file=sys.stderr)
@@ -195,6 +195,59 @@ def upload_file(local_file_path, port=None, container="container1"):
     return soft_reset(port=port)
 
 
+def upload_and_monitor(local_file_path, port=None, container="container1"):
+    """
+    将本地文件烧录到硬件的指定容器文件夹中，soft_reset 后持续监听串口输出。
+    """
+    rc = _copy_to_container(local_file_path, port=port, container=container)
+    if rc != 0:
+        return rc
+    rc = soft_reset(port=port)
+    if rc != 0:
+        return rc
+
+    if not port:
+        port = get_default_port()
+    if not port:
+        print("❌ 错误：未检测到星瀚控制器！", file=sys.stderr)
+        return 2
+
+    print("")
+    print("📡 上传完成，正在监听串口输出...（点击「停止」按钮结束）", flush=True)
+    print("-" * 40, flush=True)
+
+    import time
+    time.sleep(1)
+
+    try:
+        ser = serial.Serial(port, 115200, timeout=0.5)
+        buf = b""
+        while True:
+            chunk = ser.read(ser.in_waiting or 1)
+            if chunk:
+                buf += chunk
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    text = line.decode("utf-8", errors="replace").rstrip("\r")
+                    print(text, flush=True)
+            elif buf:
+                text = buf.decode("utf-8", errors="replace").rstrip("\r")
+                print(text, flush=True)
+                buf = b""
+    except KeyboardInterrupt:
+        pass
+    except serial.SerialException as e:
+        print(f"\n❌ 串口错误: {e}", file=sys.stderr)
+        return 3
+    finally:
+        try:
+            ser.close()
+        except Exception:
+            pass
+
+    return 0
+
+
 def upload_and_run_file(local_file_path, port=None, container="container1"):
     """
     将本地文件烧录到硬件的指定容器文件夹中（会先清空容器中的旧文件），并在设备上运行。
@@ -220,6 +273,109 @@ def upload_and_run_file(local_file_path, port=None, container="container1"):
     return run_device_file(container, file_name, port=port)
 
 
+def _enter_raw_repl(ser):
+    """进入 MicroPython raw REPL 模式，返回是否成功。"""
+    ser.write(b"\x03")
+    import time
+    time.sleep(0.1)
+    ser.write(b"\x03")
+    time.sleep(0.1)
+    ser.reset_input_buffer()
+    ser.write(b"\x01")
+    time.sleep(0.5)
+    data = ser.read(ser.in_waiting or 1)
+    return b"raw REPL" in data or b">" in data
+
+
+def _raw_exec(ser, code, timeout=10):
+    """在 raw REPL 中执行代码，返回 (stdout, stderr)。"""
+    ser.write(code.encode("utf-8") + b"\x04")
+    raw = b""
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        chunk = ser.read(ser.in_waiting or 1)
+        if chunk:
+            raw += chunk
+            if raw.count(b"\x04") >= 2:
+                break
+        else:
+            time.sleep(0.01)
+    ok_idx = raw.find(b"OK")
+    if ok_idx == -1:
+        return "", raw.decode("utf-8", errors="replace")
+    after_ok = raw[ok_idx + 2:]
+    parts = after_ok.split(b"\x04")
+    stdout_part = parts[0].decode("utf-8", errors="replace") if len(parts) > 0 else ""
+    stderr_part = parts[1].decode("utf-8", errors="replace") if len(parts) > 1 else ""
+    return stdout_part, stderr_part
+
+
+def _upload_with_progress(local_file_path, port, container, file_name):
+    """通过 raw REPL 分块上传文件并显示进度，返回 0 成功，非 0 失败。"""
+    import time
+    import base64
+
+    file_size = os.path.getsize(local_file_path)
+    with open(local_file_path, "rb") as f:
+        data = f.read()
+
+    chunk_size = 512
+    device_path = f"{container}/{file_name}"
+
+    try:
+        ser = serial.Serial(port, 115200, timeout=5)
+    except serial.SerialException as e:
+        print(f"❌ 无法打开串口 {port}: {e}", file=sys.stderr)
+        return 3
+
+    try:
+        if not _enter_raw_repl(ser):
+            print("❌ 无法进入 raw REPL 模式", file=sys.stderr)
+            return 3
+
+        _, err = _raw_exec(ser, "import ubinascii")
+        if err:
+            _, err = _raw_exec(ser, "import binascii as ubinascii")
+            if err:
+                print(f"❌ 设备缺少 ubinascii/binascii 模块: {err}", file=sys.stderr)
+                return 3
+
+        _, err = _raw_exec(ser, f"_f = open('{device_path}', 'wb')")
+        if err:
+            print(f"❌ 无法在设备上创建文件: {err}", file=sys.stderr)
+            return 3
+
+        sent = 0
+        total_chunks = (len(data) + chunk_size - 1) // chunk_size
+        for i in range(0, len(data), chunk_size):
+            chunk = data[i:i + chunk_size]
+            b64 = base64.b64encode(chunk).decode("ascii")
+            _, err = _raw_exec(ser, f"_f.write(ubinascii.a2b_base64('{b64}'))")
+            if err:
+                print(f"\n❌ 写入数据时出错: {err}", file=sys.stderr)
+                _raw_exec(ser, "_f.close()")
+                return 3
+            sent += len(chunk)
+            pct = int(sent * 100 / file_size)
+            print(f"##PROGRESS:{pct}##", flush=True)
+
+        print()
+
+        _, err = _raw_exec(ser, "_f.close()")
+        if err:
+            print(f"⚠️ 关闭文件时出错: {err}", file=sys.stderr)
+
+        return 0
+    finally:
+        try:
+            ser.write(b"\x02")
+            time.sleep(0.1)
+            ser.close()
+        except Exception:
+            pass
+
+
 def _copy_to_container(local_file_path, port=None, container="container1"):
     """将本地文件写入指定容器（会先清空容器），不运行。"""
     if container not in CONTAINERS:
@@ -239,37 +395,17 @@ def _copy_to_container(local_file_path, port=None, container="container1"):
     file_name = os.path.basename(local_file_path)
     remote_path = f":{container}/{file_name}"
 
-    print(f"🔌 端口：{port}")
-    
+    print(f"🚀 正在烧录 '{file_name}' ...")
+
     # 先清空容器中的旧文件
-    print(f"🧹 清空 {container} 中的旧文件...")
     clear_container(port, container)
-    
-    print(f"🚀 正在将 '{file_name}' 烧录到 {remote_path} ...")
 
-    cmd = [
-        "mpremote", "connect", port,
-        "fs", "cp", local_file_path, remote_path,
-    ]
-
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        print(f"✅ 烧录成功！已上传 {remote_path}。")
-        if result.stdout:
-            print(result.stdout.strip())
-    except subprocess.CalledProcessError as e:
+    rc = _upload_with_progress(local_file_path, port, container, file_name)
+    if rc == 0:
+        print(f"✅ 烧录成功！已上传到 {container}。")
+    else:
         print("❌ 烧录失败！", file=sys.stderr)
-        if "ENOENT" in (e.stderr or "") or "No such file or directory" in (e.stderr or ""):
-            print(f"💡 提示：硬件上可能没有 '{container}' 文件夹。", file=sys.stderr)
-            print(f"可先运行：mpremote connect {port} fs mkdir {container}", file=sys.stderr)
-        else:
-            print((e.stderr or e.stdout or str(e)).strip(), file=sys.stderr)
-        return 3
-    except FileNotFoundError:
-        print("❌ 错误：未找到 mpremote 命令，请安装：pip install mpremote", file=sys.stderr)
-        return 4
-
-    return 0
+    return rc
 
 
 def run_on_device(local_file_path, port=None):
@@ -637,6 +773,7 @@ def main():
     parser.add_argument("--rename", nargs=2, metavar=("OLD", "NEW"), help="在同一容器内重命名 .py 文件：旧名 新名")
     parser.add_argument("--run", "-r", action="store_true", help="在设备上直接运行文件（不写入设备存储）")
     parser.add_argument("--upload-and-run", action="store_true", help="上传到容器后在设备上运行")
+    parser.add_argument("--upload-and-monitor", action="store_true", help="上传到容器后监听串口输出")
     parser.add_argument("--soft-reset", action="store_true", help="向设备发送软复位（停止设备上正在运行的程序）")
     parser.add_argument("--wifi", nargs=2, metavar=("SSID", "PASSWORD"), help="连接 WiFi：--wifi <名称> <密码>")
     parser.add_argument("--wifi-auth", type=int, default=3, help="WiFi 认证模式（默认 3）")
@@ -689,6 +826,8 @@ def main():
         return run_on_device(target_file, port=args.port)
     if args.upload_and_run:
         return upload_and_run_file(target_file, port=args.port, container=args.container)
+    if args.upload_and_monitor:
+        return upload_and_monitor(target_file, port=args.port, container=args.container)
     return upload_file(target_file, port=args.port, container=args.container)
 
 
